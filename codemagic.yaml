@@ -1,0 +1,69 @@
+workflows:
+  ios-user:
+    name: GoFix iOS
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.avtoservis.app
+      vars:
+        APP_FLAVOR: user
+      flutter: 3.24.5
+    scripts:
+      - name: Restore Firebase configuration
+        script: |
+          test -n "$FIREBASE_USER_PLIST_BASE64" || (echo "Set FIREBASE_USER_PLIST_BASE64 in Codemagic" && exit 1)
+          echo "$FIREBASE_USER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Build GoFix IPA
+        script: flutter build ipa --release --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-owner:
+    name: GoFix ustalar iOS
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.avtoservis.owner
+      vars:
+        APP_FLAVOR: owner
+      flutter: 3.24.5
+    scripts:
+      - name: Restore Firebase configuration
+        script: |
+          test -n "$FIREBASE_OWNER_PLIST_BASE64" || (echo "Set FIREBASE_OWNER_PLIST_BASE64 in Codemagic" && exit 1)
+          echo "$FIREBASE_OWNER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Build GoFix ustalar IPA
+        script: flutter build ipa --release --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+  ios-admin:
+    name: GoFix admin iOS
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.avtoservis.admin
+      vars:
+        APP_FLAVOR: admin
+      flutter: 3.24.5
+    scripts:
+      - name: Restore Firebase configuration
+        script: |
+          test -n "$FIREBASE_ADMIN_PLIST_BASE64" || (echo "Set FIREBASE_ADMIN_PLIST_BASE64 in Codemagic" && exit 1)
+          echo "$FIREBASE_ADMIN_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Build GoFix admin IPA
+        script: flutter build ipa --release --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log

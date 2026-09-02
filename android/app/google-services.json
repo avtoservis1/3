@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "885647698321",
+    "project_id": "avtoservis-app-ea648",
+    "storage_bucket": "avtoservis-app-ea648.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:885647698321:android:7910e0022dd519fd751230",
+        "android_client_info": {
+          "package_name": "com.avtoservis.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4zaGCeQTaOExQ-suy-qTb4V1djJG_m5s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:885647698321:android:7910e0022dd519fd751231",
+        "android_client_info": {
+          "package_name": "com.avtoservis.owner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4zaGCeQTaOExQ-suy-qTb4V1djJG_m5s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:885647698321:android:7910e0022dd519fd751232",
+        "android_client_info": {
+          "package_name": "com.avtoservis.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4zaGCeQTaOExQ-suy-qTb4V1djJG_m5s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

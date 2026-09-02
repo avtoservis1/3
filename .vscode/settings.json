@@ -1,0 +1,11 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:system",
+    "dart.flutterSdkPath": "D:/flutter",
+    "dart.debugExternalPackageLibraries": true,
+    "dart.debugSdkLibraries": false,
+    "editor.formatOnSave": true,
+    "files.watcherExclude": {
+        "**/.dart_tool": true,
+        "**/build": true
+    }
+}
