@@ -16,10 +16,10 @@ workflows:
           echo "$FIREBASE_USER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Set up code signing
-        script: xcode-project use-profiles
-      - name: Build GoFix IPA
-        script: flutter build ipa --release --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+      - name: Set up code signing and build IPA
+        script: |
+          xcode-project use-profiles
+          flutter build ipa --release --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -47,10 +47,10 @@ workflows:
           echo "$FIREBASE_OWNER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Set up code signing
-        script: xcode-project use-profiles
-      - name: Build GoFix ustalar IPA
-        script: flutter build ipa --release --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+      - name: Set up code signing and build IPA
+        script: |
+          xcode-project use-profiles
+          flutter build ipa --release --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -78,10 +78,10 @@ workflows:
           echo "$FIREBASE_ADMIN_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Set up code signing
-        script: xcode-project use-profiles
-      - name: Build GoFix admin IPA
-        script: flutter build ipa --release --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
+      - name: Set up code signing and build IPA
+        script: |
+          xcode-project use-profiles
+          flutter build ipa --release --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$CM_EXPORT_OPTIONS_PLIST
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
