@@ -12,9 +12,15 @@ workflows:
     scripts:
       - name: Restore Firebase configuration
         script: |
-          test -n "$FIREBASE_USER_PLIST_BASE64" || (echo "Set FIREBASE_USER_PLIST_BASE64 in Codemagic" && exit 1)
+          if [ -z "$FIREBASE_USER_PLIST_BASE64" ]; then
+            echo "XATO: FIREBASE_USER_PLIST_BASE64 Codemagic'da o'rnatilmagan yoki bo'sh!"
+            exit 1
+          fi
           echo "$FIREBASE_USER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
-          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_USER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
+          if ! plutil -lint ios/Runner/GoogleService-Info.plist; then
+            echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_USER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring."
+            exit 1
+          fi
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
@@ -44,9 +50,15 @@ workflows:
     scripts:
       - name: Restore Firebase configuration
         script: |
-          test -n "$FIREBASE_OWNER_PLIST_BASE64" || (echo "Set FIREBASE_OWNER_PLIST_BASE64 in Codemagic" && exit 1)
+          if [ -z "$FIREBASE_OWNER_PLIST_BASE64" ]; then
+            echo "XATO: FIREBASE_OWNER_PLIST_BASE64 Codemagic'da o'rnatilmagan yoki bo'sh!"
+            exit 1
+          fi
           echo "$FIREBASE_OWNER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
-          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_OWNER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
+          if ! plutil -lint ios/Runner/GoogleService-Info.plist; then
+            echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_OWNER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring."
+            exit 1
+          fi
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
@@ -76,9 +88,15 @@ workflows:
     scripts:
       - name: Restore Firebase configuration
         script: |
-          test -n "$FIREBASE_ADMIN_PLIST_BASE64" || (echo "Set FIREBASE_ADMIN_PLIST_BASE64 in Codemagic" && exit 1)
+          if [ -z "$FIREBASE_ADMIN_PLIST_BASE64" ]; then
+            echo "XATO: FIREBASE_ADMIN_PLIST_BASE64 Codemagic'da o'rnatilmagan yoki bo'sh!"
+            exit 1
+          fi
           echo "$FIREBASE_ADMIN_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
-          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_ADMIN_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
+          if ! plutil -lint ios/Runner/GoogleService-Info.plist; then
+            echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_ADMIN_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring."
+            exit 1
+          fi
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
