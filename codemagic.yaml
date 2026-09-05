@@ -3,6 +3,8 @@ workflows:
     name: GoFix iOS
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - GoFix
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.avtoservis.app
@@ -41,6 +43,8 @@ workflows:
     name: GoFix ustalar iOS
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - GoFix
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.avtoservis.owner
@@ -79,6 +83,8 @@ workflows:
     name: GoFix admin iOS
     instance_type: mac_mini_m2
     environment:
+      groups:
+        - GoFix
       ios_signing:
         distribution_type: ad_hoc
         bundle_identifier: com.avtoservis.admin
