@@ -14,6 +14,7 @@ workflows:
         script: |
           test -n "$FIREBASE_USER_PLIST_BASE64" || (echo "Set FIREBASE_USER_PLIST_BASE64 in Codemagic" && exit 1)
           echo "$FIREBASE_USER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_USER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
@@ -45,6 +46,7 @@ workflows:
         script: |
           test -n "$FIREBASE_OWNER_PLIST_BASE64" || (echo "Set FIREBASE_OWNER_PLIST_BASE64 in Codemagic" && exit 1)
           echo "$FIREBASE_OWNER_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_OWNER_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
@@ -76,6 +78,7 @@ workflows:
         script: |
           test -n "$FIREBASE_ADMIN_PLIST_BASE64" || (echo "Set FIREBASE_ADMIN_PLIST_BASE64 in Codemagic" && exit 1)
           echo "$FIREBASE_ADMIN_PLIST_BASE64" | base64 --decode > ios/Runner/GoogleService-Info.plist
+          plutil -lint ios/Runner/GoogleService-Info.plist || (echo "XATO: GoogleService-Info.plist buzilgan! FIREBASE_ADMIN_PLIST_BASE64 qiymatini Codemagic'da qayta tekshiring." && exit 1)
       - name: Get Flutter packages
         script: flutter pub get
       - name: Set up code signing and build IPA
