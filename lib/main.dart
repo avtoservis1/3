@@ -3354,10 +3354,23 @@ class _LoginScreenState extends State<LoginScreen> {
   String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
   String get _otpCode => _otpController.text;
 
+  // Apple App Store Connect reviewerlari uchun maxsus test raqami:
+  // bu raqam kiritilganda SMS tasdiqlash bosqichi butunlay o'tkazib
+  // yuborilib, to'g'ridan-to'g'ri parol bosqichiga o'tiladi (chunki
+  // reviewer haqiqiy SMS kodini ololmaydi). Backend (/api/login) ham
+  // shu raqam uchun SMS/OTP so'ramasdan tokenni darhol qaytaradi.
+  static const String _appleReviewTestPhone = '+998889791007';
+
   Future<void> _goToOtpStep() async {
     if (_digits.length < 9 || _isSendingOtp) return;
-    setState(() => _isSendingOtp = true);
     final phone = _formatPhone(_phoneController.text);
+    if (phone == _appleReviewTestPhone) {
+      setState(() => _step = 2);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _passwordFocusNode.requestFocus());
+      return;
+    }
+    setState(() => _isSendingOtp = true);
     final result = await ApiService.sendOtp(phone);
     setState(() => _isSendingOtp = false);
     if (!mounted) return;
