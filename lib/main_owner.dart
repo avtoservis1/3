@@ -4208,16 +4208,40 @@ class _LoginScreenState extends State<LoginScreen> {
   String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
   String get _otpCode => _otpController.text;
 
+  // Apple App Store Connect reviewerlari uchun maxsus test raqami:
+  // bu raqam kiritilganda na SMS, na parol so'raladi - telefon raqami
+  // kiritilishi bilanoq to'g'ridan-to'g'ri akkauntga kirib boriladi.
+  static const String _appleReviewTestPhone = '+998889791000';
+  static const String _appleReviewTestPassword = 'asliddin';
+
+  Future<void> _autoLoginTestAccount(String phone) async {
+    setState(() => _isSendingOtp = true);
+    final result = await ApiService.login(phone, _appleReviewTestPassword);
+    setState(() => _isSendingOtp = false);
+    if (!mounted) return;
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(result['message'] ?? 'Kirishda xatolik'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    final data = result['data'] as Map<String, dynamic>;
+    await routeAfterAuth(context,
+        role: data['role']?.toString() ?? 'user',
+        userId: data['user_id'] as int);
+  }
+
   Future<void> _goToOtpStep() async {
     if (_digits.length < 9 || _isSendingOtp) return;
     final phone = _formatPhone(_phoneController.text);
-    // Apple App Store Connect reviewer test raqami: qayta kirishda SMS
-    // bosqichi butunlay o'tkazib yuborilib, to'g'ridan-to'g'ri parol
-    // bosqichiga o'tiladi.
-    if (phone == '+998889791000') {
-      setState(() => _step = 2);
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _passwordFocusNode.requestFocus());
+    // Apple App Store Connect reviewer test raqami: telefon raqami
+    // kiritilishi bilanoq SMS va parol bosqichlarisiz to'g'ridan-to'g'ri
+    // kirib boriladi.
+    if (phone == _appleReviewTestPhone) {
+      await _autoLoginTestAccount(phone);
       return;
     }
     setState(() => _isSendingOtp = true);
