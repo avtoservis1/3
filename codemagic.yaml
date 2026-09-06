@@ -28,7 +28,7 @@ workflows:
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
-          flutter build ipa --release --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$HOME/export_options.plist
+          flutter build ipa --release --build-number=$BUILD_NUMBER --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -68,7 +68,7 @@ workflows:
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
-          flutter build ipa --release --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$HOME/export_options.plist
+          flutter build ipa --release --build-number=$BUILD_NUMBER --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -108,7 +108,7 @@ workflows:
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
-          flutter build ipa --release --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$HOME/export_options.plist
+          flutter build ipa --release --build-number=$BUILD_NUMBER --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
