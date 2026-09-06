@@ -4210,8 +4210,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _goToOtpStep() async {
     if (_digits.length < 9 || _isSendingOtp) return;
-    setState(() => _isSendingOtp = true);
     final phone = _formatPhone(_phoneController.text);
+    // Apple App Store Connect reviewer test raqami: qayta kirishda SMS
+    // bosqichi butunlay o'tkazib yuborilib, to'g'ridan-to'g'ri parol
+    // bosqichiga o'tiladi.
+    if (phone == '+998889791000') {
+      setState(() => _step = 2);
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _passwordFocusNode.requestFocus());
+      return;
+    }
+    setState(() => _isSendingOtp = true);
     final result = await ApiService.sendOtp(phone);
     setState(() => _isSendingOtp = false);
     if (!mounted) return;
