@@ -2577,10 +2577,10 @@ class _AdminUsersListScreenState extends State<AdminUsersListScreen> {
     });
   }
 
-  String _roleLabel(String? role) {
+  String _roleLabel(String? role, [String? providerType]) {
     switch (role) {
       case 'service_owner':
-        return 'Servis egasi';
+        return _providerTypeLabel(providerType);
       case 'admin':
         return 'Admin';
       default:
@@ -2672,7 +2672,7 @@ class _AdminUsersListScreenState extends State<AdminUsersListScreen> {
                                                           .textPrimary)),
                                               const SizedBox(height: 3),
                                               Text(
-                                                  '${u['phone'] ?? ''} • ${_roleLabel(u['role'] as String?)}',
+                                                  '${u['phone'] ?? ''} • ${_roleLabel(u['role'] as String?, u['provider_type'] as String?)}',
                                                   style: const TextStyle(
                                                       fontSize: 12.5,
                                                       color: AppColors
