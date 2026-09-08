@@ -494,6 +494,30 @@ class ApiService {
     }
   }
 
+  /// Akkauntni butunlay o'chiradi (Apple/Google talabi). Muvaffaqiyatli
+  /// bo'lsa, chaqiruvchi tomon lokal saqlangan token/prefs'ni tozalab,
+  /// foydalanuvchini Welcome ekraniga qaytarishi kerak.
+  static Future<Map<String, dynamic>> deleteAccount(
+      int userId, String password) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/delete-account'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId, 'password': password}),
+      );
+      if (response.statusCode == 200) {
+        return {'success': true};
+      }
+      String message = 'Akkaunt o\'chirilmadi';
+      try {
+        message = jsonDecode(response.body)['detail'] ?? message;
+      } catch (_) {}
+      return {'success': false, 'message': message};
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
   static Future<Map<String, dynamic>> register({
     required String phone,
     required String name,
@@ -6950,6 +6974,23 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => DeleteAccountScreen(
+                                    userId: widget.ownerId)));
+                      },
+                      child: const Text('Akkauntni o\'chirish',
+                          style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13.5)),
+                    ),
+                  ),
                 ],
               ],
             ),
@@ -7162,6 +7203,181 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 8),
               GlassGradientButton(
                   label: 'Saqlash', isLoading: _isSaving, onPressed: _save),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ========================================================================
+// DELETE ACCOUNT SCREEN — Apple/Google talabi: ro'yxatdan o'tish imkoni
+// bo'lgan har qanday ilova akkauntni ilova ichidan o'chirish imkonini
+// berishi shart (Apple Guideline 5.1.1(v)).
+// ========================================================================
+
+class DeleteAccountScreen extends StatefulWidget {
+  final int userId;
+  const DeleteAccountScreen({super.key, required this.userId});
+  @override
+  State<DeleteAccountScreen> createState() => _DeleteAccountScreenState();
+}
+
+class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
+  final _passwordController = TextEditingController();
+  bool _obscure = true;
+  bool _isDeleting = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmAndDelete() async {
+    final password = _passwordController.text;
+    if (password.isEmpty) {
+      setState(() => _error = 'Parolni kiriting');
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Akkauntni o\'chirish'),
+        content: const Text(
+            'Bu amalni ortga qaytarib bo\'lmaydi. Akkauntingiz butunlay '
+            'o\'chiriladi. Davom etasizmi?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Bekor qilish')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('O\'chirish',
+                  style: TextStyle(color: AppColors.error))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() {
+      _isDeleting = true;
+      _error = null;
+    });
+    final result = await ApiService.deleteAccount(widget.userId, password);
+    setState(() => _isDeleting = false);
+    if (!mounted) return;
+
+    if (result['success'] != true) {
+      setState(() => _error = result['message'] ?? 'Akkaunt o\'chirilmadi');
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(context,
+        MaterialPageRoute(builder: (_) => const WelcomeScreen()), (r) => false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  authBackButton(context),
+                  const SizedBox(width: 14),
+                  const Text('Akkauntni o\'chirish',
+                      style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14)),
+                child: const Text(
+                    'Akkauntingizni o\'chirsangiz, shaxsiy ma\'lumotlaringiz '
+                    'butunlay o\'chiriladi. Bu amalni ortga qaytarib '
+                    'bo\'lmaydi.',
+                    style: TextStyle(
+                        color: AppColors.error,
+                        fontSize: 13.5,
+                        height: 1.4)),
+              ),
+              const SizedBox(height: 24),
+              const Text('Parolingizni tasdiqlang',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _passwordController,
+                obscureText: _obscure,
+                keyboardType: TextInputType.visiblePassword,
+                enableSuggestions: false,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  hintText: '••••••',
+                  prefixIcon: const Icon(Icons.lock_outline,
+                      color: AppColors.textMuted),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                        _obscure
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: AppColors.textMuted),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(_error!,
+                    style: const TextStyle(
+                        color: AppColors.error, fontSize: 13.5)),
+              ],
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: Material(
+                  color: AppColors.error,
+                  borderRadius: BorderRadius.circular(16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: _isDeleting ? null : _confirmAndDelete,
+                    child: Center(
+                      child: _isDeleting
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2.4, color: Colors.white))
+                          : const Text('Akkauntni butunlay o\'chirish',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15)),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
