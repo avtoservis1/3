@@ -2030,10 +2030,18 @@ void main() {
 
 Future<void> startUserApp() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: kIsWeb ? DefaultFirebaseOptions.web : null,
-  );
-  await PushNotificationService.initialize();
+
+  // Firebase ilova ishlashi uchun zarur, shuning uchun buni kutamiz,
+  // lekin xato yoki juda uzoq kutish ilovani abadiy bloklab qo'ymasligi
+  // uchun timeout va try/catch bilan himoyalaymiz.
+  try {
+    await Firebase.initializeApp(
+      options: kIsWeb ? DefaultFirebaseOptions.web : null,
+    ).timeout(const Duration(seconds: 10));
+  } catch (e) {
+    debugPrint('Firebase.initializeApp xatosi yoki timeout: $e');
+  }
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -2043,7 +2051,16 @@ Future<void> startUserApp() async {
     ),
   );
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Ilova interfeysini DARHOL chizamiz - push-bildirishnomalarni
+  // orqa fonda, runApp()dan KEYIN sozlaymiz. Shu tufayli push
+  // xizmati (APNs) biror sababga ko'ra sekinlashsa yoki
+  // ishlamay qolsa ham, foydalanuvchi oq ekran ko'rmaydi.
   runApp(const MyApp());
+
+  PushNotificationService.initialize().catchError((e) {
+    debugPrint('PushNotificationService xatosi: $e');
+  });
 }
 
 class MyApp extends StatelessWidget {
