@@ -7342,9 +7342,10 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                     color: AppColors.error.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(14)),
                 child: const Text(
-                    'Akkauntingizni o\'chirsangiz, shaxsiy ma\'lumotlaringiz, '
-                    'mashinalaringiz va sevimlilar ro\'yxati butunlay '
-                    'o\'chiriladi. Bu amalni ortga qaytarib bo\'lmaydi.',
+                    'Akkauntingizni o\'chirsangiz, profilingiz, mashinalaringiz, '
+                    'sevimlilar ro\'yxati, buyurtmalar tarixi, sharhlaringiz va '
+                    'chat yozishmalaringiz bazadan butunlay o\'chiriladi. Bu '
+                    'amalni ortga qaytarib bo\'lmaydi.',
                     style: TextStyle(
                         color: AppColors.error,
                         fontSize: 13.5,
