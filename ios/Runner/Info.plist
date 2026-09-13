@@ -49,5 +49,11 @@
 	<string>Ilova sizga eng yaqin xizmat ko'rsatuvchilarni topish, evakuator/benzin dastavka uchun manzilingizni aniqlash va buyurtmangizni kuzatish uchun joylashuvingizdan foydalanadi.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Ilova sizga eng yaqin xizmat ko'rsatuvchilarni topish, evakuator/benzin dastavka uchun manzilingizni aniqlash va buyurtmangizni kuzatish uchun joylashuvingizdan foydalanadi.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Ilova servis yoki mashina rasmini yuklash uchun kameradan foydalanadi</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Ilova galereyadan rasm tanlash uchun foydalanadi</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
