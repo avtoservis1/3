@@ -25,6 +25,13 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Force correct iOS deployment target
+        script: |
+          # Ba'zi Codemagic/Xcode kombinatsiyalarida IPHONEOS_DEPLOYMENT_TARGET
+          # build vaqtida SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarilib
+          # ketadi. Shu yerda uni majburan loyihada belgilangan qiymatga
+          # (15.0) qaytaramiz, build har doim to'g'ri bo'lishi uchun.
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
@@ -37,7 +44,6 @@ workflows:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
 
   ios-owner:
     name: GoFix ustalar iOS
@@ -65,6 +71,13 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Force correct iOS deployment target
+        script: |
+          # Ba'zi Codemagic/Xcode kombinatsiyalarida IPHONEOS_DEPLOYMENT_TARGET
+          # build vaqtida SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarilib
+          # ketadi. Shu yerda uni majburan loyihada belgilangan qiymatga
+          # (15.0) qaytaramiz, build har doim to'g'ri bo'lishi uchun.
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
@@ -77,7 +90,6 @@ workflows:
         api_key: $APP_STORE_CONNECT_PRIVATE_KEY
         key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
         issuer_id: $APP_STORE_CONNECT_ISSUER_ID
-        submit_to_testflight: true
 
   ios-admin:
     name: GoFix admin iOS
@@ -105,6 +117,9 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Force correct iOS deployment target
+        script: |
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
