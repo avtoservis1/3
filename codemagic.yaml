@@ -25,16 +25,14 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Force correct iOS deployment target
-        script: |
-          # Ba'zi Codemagic/Xcode kombinatsiyalarida IPHONEOS_DEPLOYMENT_TARGET
-          # build vaqtida SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarilib
-          # ketadi. Shu yerda uni majburan loyihada belgilangan qiymatga
-          # (15.0) qaytaramiz, build har doim to'g'ri bo'lishi uchun.
-          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
+          # xcode-project use-profiles konfiguratsiyasi ba'zan IPHONEOS_DEPLOYMENT_TARGET'ni
+          # SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarib qo'yadi. Shu sabab uni
+          # AYNAN shu yerda, use-profiles'dan KEYIN va build'dan OLDIN majburan
+          # loyihada kerakli qiymatga (15.0) qaytaramiz.
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
@@ -71,16 +69,10 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Force correct iOS deployment target
-        script: |
-          # Ba'zi Codemagic/Xcode kombinatsiyalarida IPHONEOS_DEPLOYMENT_TARGET
-          # build vaqtida SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarilib
-          # ketadi. Shu yerda uni majburan loyihada belgilangan qiymatga
-          # (15.0) qaytaramiz, build har doim to'g'ri bo'lishi uchun.
-          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
@@ -117,12 +109,10 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Force correct iOS deployment target
-        script: |
-          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
+          find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
