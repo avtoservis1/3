@@ -16,7 +16,7 @@ workflows:
       # o'sha versiyaning iOS 26.5 SDK'si past deployment target'larni (15.0)
       # e'tiborsiz qoldirib, buni majburan 26.5'ga ko'tarib yuborayotgan edi.
       # Endi barqaror, keng sinalgan versiyani qattiq belgilaymiz.
-      xcode: 16.4
+      xcode: 26.2
       cocoapods: default
     scripts:
       - name: Restore Firebase configuration
@@ -60,7 +60,7 @@ workflows:
       vars:
         APP_FLAVOR: owner
       flutter: 3.24.5
-      xcode: 16.4
+      xcode: 26.2
       cocoapods: default
     scripts:
       - name: Restore Firebase configuration
@@ -104,7 +104,7 @@ workflows:
       vars:
         APP_FLAVOR: admin
       flutter: 3.24.5
-      xcode: 16.4
+      xcode: 26.2
       cocoapods: default
     scripts:
       - name: Restore Firebase configuration
