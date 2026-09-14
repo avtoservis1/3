@@ -28,12 +28,31 @@ workflows:
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
-          # xcode-project use-profiles konfiguratsiyasi ba'zan IPHONEOS_DEPLOYMENT_TARGET'ni
-          # SDK versiyasiga (masalan 26.5) noto'g'ri ko'tarib qo'yadi. Shu sabab uni
-          # AYNAN shu yerda, use-profiles'dan KEYIN va build'dan OLDIN majburan
-          # loyihada kerakli qiymatga (15.0) qaytaramiz.
+
+          echo "== pbxproj'dagi qiymat sed'dan OLDIN =="
+          grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
+
           find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
+
+          echo "== pbxproj'dagi qiymat sed'dan KEYIN =="
+          grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
+
+          # Qo'shimcha, mustaqil usul: muhit o'zgaruvchisi orqali ham majburlaymiz -
+          # Xcode ba'zan buni pbxproj'dan ustunroq qabul qiladi.
+          export IPHONEOS_DEPLOYMENT_TARGET=15.0
+
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor user --dart-define=APP_FLAVOR=user --export-options-plist=$HOME/export_options.plist
+
+          echo "== Tayyor .xcarchive ichidagi HAQIQIY MinimumOSVersion =="
+          ARCHIVE_PLIST="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist"
+          if [ -f "$ARCHIVE_PLIST" ]; then
+            plutil -p "$ARCHIVE_PLIST" | grep -i MinimumOSVersion || echo "MinimumOSVersion topilmadi"
+          else
+            echo "Arxiv Info.plist topilmadi: $ARCHIVE_PLIST"
+          fi
+
+          echo "== Runner va barcha Pods target'lari uchun xcodebuild'dan HAQIQIY qiymat =="
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release-user -showBuildSettings 2>/dev/null | grep -i "IPHONEOS_DEPLOYMENT_TARGET" || true
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -72,8 +91,29 @@ workflows:
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
+
+          echo "== pbxproj'dagi qiymat sed'dan OLDIN =="
+          grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
+
           find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
+
+          echo "== pbxproj'dagi qiymat sed'dan KEYIN =="
+          grep -n "IPHONEOS_DEPLOYMENT_TARGET" ios/Runner.xcodeproj/project.pbxproj || true
+
+          export IPHONEOS_DEPLOYMENT_TARGET=15.0
+
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor owner --dart-define=APP_FLAVOR=owner --export-options-plist=$HOME/export_options.plist
+
+          echo "== Tayyor .xcarchive ichidagi HAQIQIY MinimumOSVersion =="
+          ARCHIVE_PLIST="build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist"
+          if [ -f "$ARCHIVE_PLIST" ]; then
+            plutil -p "$ARCHIVE_PLIST" | grep -i MinimumOSVersion || echo "MinimumOSVersion topilmadi"
+          else
+            echo "Arxiv Info.plist topilmadi: $ARCHIVE_PLIST"
+          fi
+
+          echo "== Runner va barcha Pods target'lari uchun xcodebuild'dan HAQIQIY qiymat =="
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release-owner -showBuildSettings 2>/dev/null | grep -i "IPHONEOS_DEPLOYMENT_TARGET" || true
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
@@ -113,6 +153,7 @@ workflows:
         script: |
           xcode-project use-profiles
           find ios -name "project.pbxproj" -exec sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/g' {} +
+          export IPHONEOS_DEPLOYMENT_TARGET=15.0
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$HOME/export_options.plist
     artifacts:
       - build/ios/ipa/*.ipa
