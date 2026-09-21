@@ -807,6 +807,128 @@ Widget authBackButton(BuildContext context, {VoidCallback? onTap}) {
 }
 
 // ========================================================================
+// OTP KOD KIRITISH: ILOVA ICHIDAGI RAQAMLI KLAVIATURA
+// ========================================================================
+// Ilgari SMS kodini kiritish tizim (OS) klaviaturasini chaqirish uchun
+// butunlay ko'rinmas (opacity: 0) TextField'ga tayanardi. Bu ba'zi
+// qurilma/tekshiruv muhitlarida (masalan apparat klaviaturasi ulangan
+// yoki shu deb hisoblangan iPad'da - iOS bunda ekran klaviaturasini
+// avtomatik chiqarmaydi) ishlamay qolishi mumkin edi - Apple aynan shu
+// sababdan ilovani rad etdi ("the on-screen keyboard did not trigger at
+// login"). Shuning uchun endi SMS kod kiritish tizim klaviaturasiga
+// umuman bog'liq emas: quyidagi ilova ichidagi raqamli klaviatura orqali
+// kiritiladi va har qanday qurilma/muhitda bir xil, ishonchli ishlaydi.
+class OtpCodeBoxes extends StatelessWidget {
+  final String code;
+  final int length;
+  const OtpCodeBoxes({super.key, required this.code, this.length = 4});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: List.generate(length, (i) {
+        final filled = i < code.length;
+        return Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: filled ? AppColors.primary : AppColors.border,
+                width: filled ? 1.6 : 1),
+            boxShadow: [
+              BoxShadow(
+                color: filled
+                    ? AppColors.primary.withOpacity(0.15)
+                    : Colors.black.withOpacity(0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            filled ? code[i] : '',
+            style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class OtpKeypad extends StatelessWidget {
+  final ValueChanged<String> onDigit;
+  final VoidCallback onBackspace;
+  const OtpKeypad(
+      {super.key, required this.onDigit, required this.onBackspace});
+
+  Widget _key(BuildContext context,
+      {String? label, VoidCallback? onTap, Widget? child}) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(6),
+        child: Material(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: onTap,
+            child: SizedBox(
+              height: 54,
+              child: Center(
+                child: child ??
+                    Text(label ?? '',
+                        style: const TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary)),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(children: [
+          _key(context, label: '1', onTap: () => onDigit('1')),
+          _key(context, label: '2', onTap: () => onDigit('2')),
+          _key(context, label: '3', onTap: () => onDigit('3')),
+        ]),
+        Row(children: [
+          _key(context, label: '4', onTap: () => onDigit('4')),
+          _key(context, label: '5', onTap: () => onDigit('5')),
+          _key(context, label: '6', onTap: () => onDigit('6')),
+        ]),
+        Row(children: [
+          _key(context, label: '7', onTap: () => onDigit('7')),
+          _key(context, label: '8', onTap: () => onDigit('8')),
+          _key(context, label: '9', onTap: () => onDigit('9')),
+        ]),
+        Row(children: [
+          const Expanded(child: SizedBox()),
+          _key(context, label: '0', onTap: () => onDigit('0')),
+          _key(context,
+              onTap: onBackspace,
+              child: const Icon(Icons.backspace_outlined,
+                  size: 20, color: AppColors.textSecondary)),
+        ]),
+      ],
+    );
+  }
+}
+
+// ========================================================================
 // API SERVICE
 // ========================================================================
 
@@ -1750,6 +1872,60 @@ extension UserRoleName on UserRole {
 }
 
 // ========================================================================
+// APPLE APP STORE CONNECT REVIEWER TEST RAQAMI
+// ========================================================================
+// Bu raqam kiritilsa (na ro'yxatdan o'tishda, na kirishda) hech qachon SMS
+// tasdiqlash kodi yoki parol so'ralmaydi - telefon raqami kiritilishi
+// bilanoq to'g'ridan-to'g'ri demo akkauntga kirib boriladi. Sabab: Apple
+// reviewer haqiqiy SMS kodini ololmaydi, va OTP ekranidagi (yashirin
+// TextField'ga asoslangan) kod kiritish maydoni ba'zi qurilmalarda
+// (masalan iPad) klaviaturani ochmasligi mumkin - bu reviewer uchun
+// ilovani butunlay ishlatib bo'lmas holga keltiradi va reject sababi bo'ldi.
+// Shuning uchun bu raqam uchun OTP ekrani UMUMAN ko'rsatilmaydi - na
+// ro'yxatdan o'tish, na kirish oqimida. Backenddagi TEST_PHONE_NUMBERS
+// to'plamida ham xuddi shu raqam bor va /api/login OTP so'ramasdan
+// darhol token qaytaradi.
+const String kAppleReviewTestPhone = '+998889791007';
+const String kAppleReviewTestPassword = 'asliddin';
+
+/// Telefon raqamlarini solishtirish uchun bo'shliq/tire kabi belgilarni
+/// olib tashlab, faqat raqamlarni qoldiradi (masalan "+998 88 979 10 07"
+/// va "+998889791007" bir xil deb hisoblanadi).
+bool isAppleReviewTestPhone(String rawPhone) {
+  final digits = rawPhone.replaceAll(RegExp(r'[^0-9]'), '');
+  final testDigits =
+      kAppleReviewTestPhone.replaceAll(RegExp(r'[^0-9]'), '');
+  return digits == testDigits;
+}
+
+/// Apple reviewer test raqami uchun umumiy avtomatik-kirish: SMS ham,
+/// parol ham so'ramasdan to'g'ridan-to'g'ri demo akkauntga kiradi.
+/// `onLoadingChanged` tugma/holat indikatorini yangilash uchun (ixtiyoriy).
+Future<void> autoLoginAppleReviewTestAccount(
+  BuildContext context, {
+  void Function(bool isLoading)? onLoadingChanged,
+}) async {
+  onLoadingChanged?.call(true);
+  final result = await ApiService.login(
+      kAppleReviewTestPhone, kAppleReviewTestPassword);
+  onLoadingChanged?.call(false);
+  if (!context.mounted) return;
+  if (result['success'] != true) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(result['message'] ?? 'Kirishda xatolik'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating),
+    );
+    return;
+  }
+  final data = result['data'] as Map<String, dynamic>;
+  await routeAfterAuth(context,
+      role: data['role']?.toString() ?? 'user',
+      userId: data['user_id'] as int);
+}
+
+// ========================================================================
 // AUTH ROUTING (Foydalanuvchi ilovasi)
 // ========================================================================
 Future<void> routeAfterAuth(BuildContext context,
@@ -2323,6 +2499,16 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
 
   Future<void> _continue() async {
     if (_digits.length < 9) return;
+    // Apple App Store Connect reviewer test raqami: hech qachon SMS/OTP
+    // ekranini ko'rsatmasdan, to'g'ridan-to'g'ri demo akkauntga kiritamiz
+    // (registratsiya oqimidan o'tayotgan bo'lsa ham).
+    if (isAppleReviewTestPhone('+998$_digits')) {
+      await autoLoginAppleReviewTestAccount(context,
+          onLoadingChanged: (loading) {
+        if (mounted) setState(() => _isLoading = loading);
+      });
+      return;
+    }
     setState(() => _isLoading = true);
     await ApiService.sendOtp('+998$_digits');
     setState(() => _isLoading = false);
@@ -2460,24 +2646,32 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  String _code = '';
   int _secondsLeft = 45;
   Timer? _timer;
   bool _isVerifying = false;
   String? _error;
 
-  String get _code => _controller.text;
-
   @override
   void initState() {
     super.initState();
     _startTimer();
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _focusNode.requestFocus());
-    _controller.addListener(() {
-      setState(() => _error = null);
-      if (_controller.text.length == 4) _verify();
+  }
+
+  void _addDigit(String d) {
+    if (_isVerifying || _code.length >= 4) return;
+    setState(() {
+      _code += d;
+      _error = null;
+    });
+    if (_code.length == 4) _verify();
+  }
+
+  void _removeDigit() {
+    if (_code.isEmpty) return;
+    setState(() {
+      _code = _code.substring(0, _code.length - 1);
+      _error = null;
     });
   }
 
@@ -2488,9 +2682,10 @@ class _OtpScreenState extends State<OtpScreen> {
     if (!mounted) return;
     setState(() => _isVerifying = false);
     if (result['success'] != true) {
-      setState(() => _error =
-          result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring');
-      _controller.clear();
+      setState(() {
+        _error = result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring';
+        _code = '';
+      });
       return;
     }
     Navigator.push(
@@ -2516,8 +2711,6 @@ class _OtpScreenState extends State<OtpScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    _controller.dispose();
-    _focusNode.dispose();
     super.dispose();
   }
 
@@ -2551,66 +2744,9 @@ class _OtpScreenState extends State<OtpScreen> {
                         color: AppColors.textSecondary,
                         height: 1.45)),
                 const SizedBox(height: 30),
-                GestureDetector(
-                  onTap: () => _focusNode.requestFocus(),
-                  child: Stack(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: List.generate(4, (i) {
-                          final filled = i < _code.length;
-                          return Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                  color: filled
-                                      ? AppColors.primary
-                                      : AppColors.border,
-                                  width: filled ? 1.6 : 1),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: filled
-                                      ? AppColors.primary.withOpacity(0.15)
-                                      : Colors.black.withOpacity(0.03),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              filled ? _code[i] : '',
-                              style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textPrimary),
-                            ),
-                          );
-                        }),
-                      ),
-                      Positioned.fill(
-                        child: Opacity(
-                          opacity: 0,
-                          child: TextField(
-                            controller: _controller,
-                            focusNode: _focusNode,
-                            autofocus: true,
-                            keyboardType: TextInputType.number,
-                            maxLength: 4,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly
-                            ],
-                            decoration: const InputDecoration(
-                                counterText: '', border: InputBorder.none),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                OtpCodeBoxes(code: _code),
+                const SizedBox(height: 24),
+                OtpKeypad(onDigit: _addDigit, onBackspace: _removeDigit),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Center(
@@ -2683,24 +2819,32 @@ class LoginOtpScreen extends StatefulWidget {
 }
 
 class _LoginOtpScreenState extends State<LoginOtpScreen> {
-  final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  String _code = '';
   int _secondsLeft = 45;
   Timer? _timer;
   bool _isVerifying = false;
   String? _error;
 
-  String get _code => _controller.text;
-
   @override
   void initState() {
     super.initState();
     _startTimer();
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _focusNode.requestFocus());
-    _controller.addListener(() {
-      setState(() => _error = null);
-      if (_controller.text.length == 4) _verify();
+  }
+
+  void _addDigit(String d) {
+    if (_isVerifying || _code.length >= 4) return;
+    setState(() {
+      _code += d;
+      _error = null;
+    });
+    if (_code.length == 4) _verify();
+  }
+
+  void _removeDigit() {
+    if (_code.isEmpty) return;
+    setState(() {
+      _code = _code.substring(0, _code.length - 1);
+      _error = null;
     });
   }
 
@@ -2710,9 +2854,10 @@ class _LoginOtpScreenState extends State<LoginOtpScreen> {
     if (!mounted) return;
     setState(() => _isVerifying = false);
     if (result['success'] != true) {
-      setState(() => _error =
-          result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring');
-      _controller.clear();
+      setState(() {
+        _error = result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring';
+        _code = '';
+      });
       return;
     }
     final data = result['data'] as Map<String, dynamic>;
@@ -2736,8 +2881,6 @@ class _LoginOtpScreenState extends State<LoginOtpScreen> {
   @override
   void dispose() {
     _timer?.cancel();
-    _controller.dispose();
-    _focusNode.dispose();
     super.dispose();
   }
 
@@ -2771,66 +2914,9 @@ class _LoginOtpScreenState extends State<LoginOtpScreen> {
                         color: AppColors.textSecondary,
                         height: 1.45)),
                 const SizedBox(height: 30),
-                GestureDetector(
-                  onTap: () => _focusNode.requestFocus(),
-                  child: Stack(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: List.generate(4, (i) {
-                          final filled = i < _code.length;
-                          return Container(
-                            width: 64,
-                            height: 64,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                  color: filled
-                                      ? AppColors.primary
-                                      : AppColors.border,
-                                  width: filled ? 1.6 : 1),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: filled
-                                      ? AppColors.primary.withOpacity(0.15)
-                                      : Colors.black.withOpacity(0.03),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              filled ? _code[i] : '',
-                              style: const TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textPrimary),
-                            ),
-                          );
-                        }),
-                      ),
-                      Positioned.fill(
-                        child: Opacity(
-                          opacity: 0,
-                          child: TextField(
-                            controller: _controller,
-                            focusNode: _focusNode,
-                            autofocus: true,
-                            keyboardType: TextInputType.number,
-                            maxLength: 4,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly
-                            ],
-                            decoration: const InputDecoration(
-                                counterText: '', border: InputBorder.none),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                OtpCodeBoxes(code: _code),
+                const SizedBox(height: 24),
+                OtpKeypad(onDigit: _addDigit, onBackspace: _removeDigit),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Center(
@@ -3380,8 +3466,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _passwordFocusNode = FocusNode();
-  final _otpController = TextEditingController();
-  final _otpFocusNode = FocusNode();
+  String _otpCode = '';
   bool _isLoading = false;
   bool _isSendingOtp = false;
   bool _isVerifyingOtp = false;
@@ -3393,42 +3478,38 @@ class _LoginScreenState extends State<LoginScreen> {
   int _step = 0;
 
   String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
-  String get _otpCode => _otpController.text;
 
-  // Apple App Store Connect reviewerlari uchun maxsus test raqami:
-  // bu raqam kiritilganda na SMS, na parol so'raladi - telefon raqami
-  // kiritilishi bilanoq to'g'ridan-to'g'ri akkauntga kirib boriladi
-  // (chunki reviewer haqiqiy SMS kodini ololmaydi, parol ekrani esa
-  // ilova tekshiruvida keraksiz qo'shimcha qadam). Backend (/api/login)
-  // ham shu raqam uchun SMS/OTP so'ramasdan tokenni darhol qaytaradi.
-  static const String _appleReviewTestPhone = '+998889791007';
-  static const String _appleReviewTestPassword = 'asliddin';
+  void _addOtpDigit(String d) {
+    if (_isVerifyingOtp || _otpCode.length >= 4) return;
+    setState(() {
+      _otpCode += d;
+      _otpError = null;
+    });
+    if (_otpCode.length == 4) _verifyOtpStep();
+  }
 
-  Future<void> _autoLoginTestAccount(String phone) async {
-    setState(() => _isSendingOtp = true);
-    final result = await ApiService.login(phone, _appleReviewTestPassword);
-    setState(() => _isSendingOtp = false);
-    if (!mounted) return;
-    if (result['success'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(result['message'] ?? 'Kirishda xatolik'),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating),
-      );
-      return;
-    }
-    final data = result['data'] as Map<String, dynamic>;
-    await routeAfterAuth(context,
-        role: data['role']?.toString() ?? 'user',
-        userId: data['user_id'] as int);
+  void _removeOtpDigit() {
+    if (_otpCode.isEmpty) return;
+    setState(() {
+      _otpCode = _otpCode.substring(0, _otpCode.length - 1);
+      _otpError = null;
+    });
   }
 
   Future<void> _goToOtpStep() async {
     if (_digits.length < 9 || _isSendingOtp) return;
     final phone = _formatPhone(_phoneController.text);
-    if (phone == _appleReviewTestPhone) {
-      await _autoLoginTestAccount(phone);
+    // Apple App Store Connect reviewerlari uchun maxsus test raqami:
+    // bu raqam kiritilganda na SMS, na parol so'raladi - telefon raqami
+    // kiritilishi bilanoq to'g'ridan-to'g'ri akkauntga kirib boriladi
+    // (chunki reviewer haqiqiy SMS kodini ololmaydi, parol ekrani esa
+    // ilova tekshiruvida keraksiz qo'shimcha qadam). Backend (/api/login)
+    // ham shu raqam uchun SMS/OTP so'ramasdan tokenni darhol qaytaradi.
+    if (isAppleReviewTestPhone(phone)) {
+      await autoLoginAppleReviewTestAccount(context,
+          onLoadingChanged: (loading) {
+        if (mounted) setState(() => _isSendingOtp = loading);
+      });
       return;
     }
     setState(() => _isSendingOtp = true);
@@ -3446,12 +3527,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     setState(() {
       _step = 1;
-      _otpController.clear();
+      _otpCode = '';
       _otpError = null;
     });
     _startTimer();
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _otpFocusNode.requestFocus());
   }
 
   Future<void> _verifyOtpStep() async {
@@ -3465,9 +3544,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
     setState(() => _isVerifyingOtp = false);
     if (result['success'] != true) {
-      setState(() => _otpError =
-          result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring');
-      _otpController.clear();
+      setState(() {
+        _otpError =
+            result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring';
+        _otpCode = '';
+      });
       return;
     }
     _timer?.cancel();
@@ -3480,7 +3561,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _timer?.cancel();
     setState(() {
       _step = 0;
-      _otpController.clear();
+      _otpCode = '';
       _otpError = null;
       _passwordController.clear();
     });
@@ -3565,8 +3646,6 @@ class _LoginScreenState extends State<LoginScreen> {
     _phoneController.dispose();
     _passwordController.dispose();
     _passwordFocusNode.dispose();
-    _otpController.dispose();
-    _otpFocusNode.dispose();
     _timer?.cancel();
     super.dispose();
   }
@@ -3681,61 +3760,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 ] else if (_step == 1) ...[
                   _phoneChip(),
                   const SizedBox(height: 24),
-                  GestureDetector(
-                    onTap: () => _otpFocusNode.requestFocus(),
-                    child: Stack(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: List.generate(4, (i) {
-                            final filled = i < _otpCode.length;
-                            return Container(
-                              width: 64,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                    color: filled
-                                        ? AppColors.primary
-                                        : AppColors.border,
-                                    width: filled ? 1.6 : 1),
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                filled ? _otpCode[i] : '',
-                                style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppColors.textPrimary),
-                              ),
-                            );
-                          }),
-                        ),
-                        Positioned.fill(
-                          child: Opacity(
-                            opacity: 0,
-                            child: TextField(
-                              controller: _otpController,
-                              focusNode: _otpFocusNode,
-                              autofocus: true,
-                              keyboardType: TextInputType.number,
-                              maxLength: 4,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly
-                              ],
-                              onChanged: (v) {
-                                setState(() => _otpError = null);
-                                if (v.length == 4) _verifyOtpStep();
-                              },
-                              decoration: const InputDecoration(
-                                  counterText: '', border: InputBorder.none),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  OtpCodeBoxes(code: _otpCode),
+                  const SizedBox(height: 24),
+                  OtpKeypad(
+                      onDigit: _addOtpDigit, onBackspace: _removeOtpDigit),
                   if (_otpError != null) ...[
                     const SizedBox(height: 16),
                     Center(
