@@ -99,7 +99,8 @@ workflows:
       groups:
         - GoFix
       ios_signing:
-        distribution_type: ad_hoc
+        # ad_hoc emas: TestFlight uchun app_store kerak
+        distribution_type: app_store
         bundle_identifier: com.avtoservis.admin
       vars:
         APP_FLAVOR: admin
@@ -124,6 +125,14 @@ workflows:
         script: |
           xcode-project use-profiles
           flutter build ipa --release --build-number=$BUILD_NUMBER --flavor admin --dart-define=APP_FLAVOR=admin --export-options-plist=$HOME/export_options.plist
+
+          echo "== Tayyor arxivdagi HAQIQIY MinimumOSVersion =="
+          plutil -p "build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app/Info.plist" | grep -i MinimumOSVersion || true
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
