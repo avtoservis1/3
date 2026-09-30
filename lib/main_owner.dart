@@ -572,6 +572,96 @@ class ApiService {
     }
   }
 
+  // ---------------------------------------------------------------
+  // PAROLNI TIKLASH (parol esdan chiqqanda)
+  // ---------------------------------------------------------------
+  static String _errDetail(http.Response r, String fallback) {
+    try {
+      final d = jsonDecode(r.body)['detail'];
+      if (d is String && d.isNotEmpty) return d;
+    } catch (_) {}
+    return fallback;
+  }
+
+  /// 1-bosqich: ro'yxatdan o'tgan raqamga SMS kod yuboradi.
+  static Future<Map<String, dynamic>> forgotPasswordSendOtp(
+      String phone) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/forgot-password/send-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone}),
+      );
+      if (response.statusCode == 200) {
+        return {'success': true};
+      }
+      return {
+        'success': false,
+        'message': _errDetail(response, 'SMS yuborilmadi')
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
+  /// 2-bosqich: SMS kodni tekshiradi (kod hali ishlatilmaydi).
+  static Future<Map<String, dynamic>> forgotPasswordVerifyOtp(
+      String phone, String code) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/forgot-password/verify-otp'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone, 'code': code}),
+      );
+      if (response.statusCode == 200) {
+        return {'success': true};
+      }
+      return {
+        'success': false,
+        'message': _errDetail(response, 'Noto\'g\'ri kod')
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
+  /// 3-bosqich: yangi parolni saqlaydi va foydalanuvchini o'sha akkauntga
+  /// kiritadi (server token qaytaradi, prefs'ga /api/login kabi yoziladi).
+  static Future<Map<String, dynamic>> resetPassword(
+      String phone, String? code, String newPassword) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/forgot-password/reset'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'phone': phone,
+          // code null bo'lsa yuborilmaydi: telefon login'da allaqachon tasdiqlangan
+          if (code != null && code.isNotEmpty) 'code': code,
+          'new_password': newPassword
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', data['token']);
+        await prefs.setString('user_id', data['user_id'].toString());
+        await prefs.setString('role', data['role']?.toString() ?? 'user');
+        await prefs.setString('phone', phone);
+        if (data['name'] != null) {
+          await prefs.setString('user_name', data['name'].toString());
+        }
+        return {'success': true, 'data': data};
+      }
+      return {
+        'success': false,
+        'status': response.statusCode,
+        'message': _errDetail(response, 'Parol yangilanmadi')
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
   static Future<Map<String, dynamic>> login(
       String phone, String password) async {
     try {
@@ -4224,6 +4314,516 @@ class _ServiceOwnerPendingScreenState extends State<ServiceOwnerPendingScreen> {
 // LOGIN SCREEN
 // ========================================================================
 
+// ========================================================================
+// PAROLNI TIKLASH EKRANI (parol esdan chiqqanda)
+// 1) telefon raqam -> SMS kod   2) kodni kiritish   3) yangi parol (2 marta)
+// Muvaffaqiyatli bo'lsa foydalanuvchi o'sha akkauntga avtomatik kiritiladi.
+// ========================================================================
+class ForgotPasswordScreen extends StatefulWidget {
+  /// Login ekranida allaqachon kiritilgan (formatlangan) telefon raqam.
+  final String initialPhone;
+
+  /// true bo'lsa telefon login ekranida SMS bilan allaqachon tasdiqlangan:
+  /// SMS bosqichlari o'tkazib yuboriladi va to'g'ridan-to'g'ri yangi parol so'raladi.
+  final bool phoneVerified;
+  const ForgotPasswordScreen(
+      {super.key, this.initialPhone = '', this.phoneVerified = false});
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _phoneController = TextEditingController();
+  final _newPassController = TextEditingController();
+  final _confirmPassController = TextEditingController();
+  final _newPassFocus = FocusNode();
+  final _otpController = TextEditingController();
+  final _otpFocusNode = FocusNode();
+  String get _otpCode => _otpController.text;
+  bool _isSendingOtp = false;
+  bool _isVerifyingOtp = false;
+  bool _isSaving = false;
+  bool _obscureNew = true;
+  bool _obscureConfirm = true;
+  String? _otpError;
+  String? _passError;
+  int _secondsLeft = 45;
+  Timer? _timer;
+  // 0 = telefon, 1 = SMS kod, 2 = yangi parol
+  int _step = 0;
+  // Login'da SMS tasdiqlangan bo'lsa true: reset SMS kodsiz yuboriladi.
+  bool _skipSms = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController.text = widget.initialPhone;
+    if (widget.phoneVerified && widget.initialPhone.replaceAll(RegExp(r'\D'), '').length == 9) {
+      _step = 2; // SMS qayta so'ralmaydi
+      _skipSms = true;
+    }
+  }
+
+  String get _digits => _phoneController.text.replaceAll(RegExp(r'\D'), '');
+
+  String _formatPhone(String phone) {
+    phone = phone.replaceAll(RegExp(r'[^0-9]'), '');
+    return '+998$phone';
+  }
+
+  void _snack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(msg),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating),
+    );
+  }
+
+  void _clearOtp() => _otpController.clear();
+
+  void _startTimer() {
+    _secondsLeft = 45;
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_secondsLeft == 0) {
+        t.cancel();
+      } else {
+        setState(() => _secondsLeft--);
+      }
+    });
+  }
+
+  String get _timerText {
+    final m = (_secondsLeft ~/ 60).toString().padLeft(2, '0');
+    final s = (_secondsLeft % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  // 1-bosqich: SMS kod yuborish
+  Future<void> _sendOtp() async {
+    if (_digits.length < 9 || _isSendingOtp) return;
+    setState(() => _isSendingOtp = true);
+    final result =
+        await ApiService.forgotPasswordSendOtp(_formatPhone(_phoneController.text));
+    if (!mounted) return;
+    setState(() => _isSendingOtp = false);
+    if (result['success'] != true) {
+      _snack(result['message'] ?? 'SMS yuborilmadi');
+      return;
+    }
+    setState(() {
+      _step = 1;
+      _clearOtp();
+      _otpError = null;
+    });
+    _startTimer();
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _otpFocusNode.requestFocus());
+  }
+
+  // 2-bosqich: kodni tekshirish
+  Future<void> _verifyOtp() async {
+    if (_otpCode.length != 4 || _isVerifyingOtp) return;
+    setState(() {
+      _isVerifyingOtp = true;
+      _otpError = null;
+    });
+    final result = await ApiService.forgotPasswordVerifyOtp(
+        _formatPhone(_phoneController.text), _otpCode);
+    if (!mounted) return;
+    setState(() => _isVerifyingOtp = false);
+    if (result['success'] != true) {
+      setState(() {
+        _otpError =
+            result['message'] ?? 'Noto\'g\'ri kod, qayta urinib ko\'ring';
+        _clearOtp();
+      });
+      return;
+    }
+    _timer?.cancel();
+    setState(() {
+      _step = 2;
+      _passError = null;
+    });
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _newPassFocus.requestFocus());
+  }
+
+  // 3-bosqich: yangi parolni saqlash va akkauntga kirish
+  Future<void> _savePassword() async {
+    if (_isSaving) return;
+    final p1 = _newPassController.text;
+    final p2 = _confirmPassController.text;
+    if (p1.length < 6) {
+      setState(() => _passError = 'Parol kamida 6 ta belgidan iborat bo\'lsin');
+      return;
+    }
+    if (p1 != p2) {
+      setState(() => _passError = 'Parollar bir xil emas');
+      return;
+    }
+    setState(() {
+      _isSaving = true;
+      _passError = null;
+    });
+    final result = await ApiService.resetPassword(
+        _formatPhone(_phoneController.text), _skipSms ? null : _otpCode, p1);
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    if (result['success'] != true) {
+      if (_skipSms && result['status'] == 409) {
+        // Tasdiqlash muddati tugagan (10 daqiqa) - faqat shunda SMS so'raymiz.
+        _skipSms = false;
+        _backToPhoneStep();
+        _snack(result['message'] ?? 'Tasdiqlash muddati tugagan');
+        return;
+      }
+      setState(() => _passError = result['message'] ?? 'Parol yangilanmadi');
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+          content: Text('Parol muvaffaqiyatli yangilandi'),
+          backgroundColor: AppColors.success,
+          behavior: SnackBarBehavior.floating),
+    );
+    final data = result['data'] as Map<String, dynamic>;
+    await routeAfterAuth(context,
+        role: data['role']?.toString() ?? 'user',
+        userId: data['user_id'] as int);
+  }
+
+  void _backToPhoneStep() {
+    _timer?.cancel();
+    setState(() {
+      _step = 0;
+      _clearOtp();
+      _otpError = null;
+      _passError = null;
+      _newPassController.clear();
+      _confirmPassController.clear();
+    });
+  }
+
+  void _backOneStep() {
+    if (_step == 0 || _skipSms) {
+      Navigator.pop(context);
+    } else {
+      // Kod bir marta tasdiqlangach 2-bosqichdan ortga qaytish yangi kod so'rashni
+      // talab qiladi, shuning uchun har ikkala holatda telefon bosqichiga qaytamiz.
+      _backToPhoneStep();
+    }
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _newPassController.dispose();
+    _confirmPassController.dispose();
+    _newPassFocus.dispose();
+    _otpController.dispose();
+    _otpFocusNode.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Widget _stepBackButton() {
+    return SizedBox(
+      height: 40,
+      width: 40,
+      child: LiquidGlass(
+        radius: 12,
+        tintOpacity: 0.7,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: _backOneStep,
+            child: const Center(
+              child: Icon(Icons.arrow_back_ios_new,
+                  size: 16, color: AppColors.textPrimary),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _phoneChip() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border)),
+      child: Row(
+        children: [
+          const Icon(Icons.phone_iphone_rounded,
+              size: 18, color: AppColors.textMuted),
+          const SizedBox(width: 10),
+          Text('+998 ${_phoneController.text}',
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const Spacer(),
+          if (!_skipSms)
+          GestureDetector(
+            onTap: _backToPhoneStep,
+            child: const Text('O\'zgartirish',
+                style: TextStyle(
+                    fontSize: 13.5,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _passDecoration(String hint, bool obscure, VoidCallback toggle) {
+    return InputDecoration(
+      hintText: hint,
+      prefixIcon: const Icon(Icons.lock_outline, color: AppColors.textMuted),
+      suffixIcon: IconButton(
+        icon: Icon(
+            obscure
+                ? Icons.visibility_off_outlined
+                : Icons.visibility_outlined,
+            color: AppColors.textMuted),
+        onPressed: toggle,
+      ),
+    );
+  }
+
+  bool get _canSave =>
+      _newPassController.text.isNotEmpty &&
+      _confirmPassController.text.isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: AuthBackground(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _stepBackButton(),
+                const SizedBox(height: 24),
+                const Text('Parolni tiklash',
+                    style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 10),
+                Text(
+                  _step == 0
+                      ? 'Akkauntingizga ulangan telefon raqamni kiriting, unga SMS kod yuboramiz.'
+                      : _step == 1
+                          ? '${_formatPhone(_phoneController.text)} raqamiga yuborilgan kodni kiriting.'
+                          : 'Yangi parolni o\'ylab toping va uni ikki marta kiriting.',
+                  style: const TextStyle(
+                      fontSize: 15,
+                      color: AppColors.textSecondary,
+                      height: 1.45),
+                ),
+                const SizedBox(height: 26),
+                if (_step == 0) ...[
+                  const Text('Telefon raqam',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _phoneController,
+                    keyboardType: TextInputType.phone,
+                    autofocus: widget.initialPhone.isEmpty,
+                    inputFormatters: [_UzPhoneFormatter()],
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) => _sendOtp(),
+                    decoration: const InputDecoration(
+                        hintText: '90 123 45 67',
+                        prefixIcon: Icon(Icons.phone_outlined,
+                            color: AppColors.textMuted)),
+                  ),
+                  const SizedBox(height: 28),
+                  GlassGradientButton(
+                      label: 'Kod yuborish',
+                      isLoading: _isSendingOtp,
+                      onPressed: _digits.length == 9 ? _sendOtp : null),
+                ] else if (_step == 1) ...[
+                  _phoneChip(),
+                  const SizedBox(height: 24),
+                  GestureDetector(
+                    onTap: () => _otpFocusNode.requestFocus(),
+                    child: Stack(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: List.generate(4, (i) {
+                            final filled = i < _otpCode.length;
+                            return Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                    color: filled
+                                        ? AppColors.primary
+                                        : AppColors.border,
+                                    width: filled ? 1.6 : 1),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                filled ? _otpCode[i] : '',
+                                style: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textPrimary),
+                              ),
+                            );
+                          }),
+                        ),
+                        Positioned.fill(
+                          child: Opacity(
+                            opacity: 0,
+                            child: TextField(
+                              controller: _otpController,
+                              focusNode: _otpFocusNode,
+                              autofocus: true,
+                              keyboardType: TextInputType.number,
+                              maxLength: 4,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly
+                              ],
+                              onChanged: (v) {
+                                setState(() => _otpError = null);
+                                if (v.length == 4) _verifyOtp();
+                              },
+                              decoration: const InputDecoration(
+                                  counterText: '', border: InputBorder.none),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_otpError != null) ...[
+                    const SizedBox(height: 16),
+                    Center(
+                      child: Text(_otpError!,
+                          style: const TextStyle(
+                              fontSize: 13.5,
+                              color: AppColors.error,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                  if (_isVerifyingOtp) ...[
+                    const SizedBox(height: 16),
+                    const Center(
+                        child: SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.4, color: AppColors.primary))),
+                  ],
+                  const SizedBox(height: 22),
+                  Center(
+                    child: _secondsLeft > 0
+                        ? RichText(
+                            text: TextSpan(
+                              style: const TextStyle(
+                                  fontSize: 14.5,
+                                  color: AppColors.textSecondary),
+                              children: [
+                                const TextSpan(text: 'Kod qayta yuborish: '),
+                                TextSpan(
+                                    text: _timerText,
+                                    style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          )
+                        : GestureDetector(
+                            onTap: _isSendingOtp ? null : _sendOtp,
+                            child: const Text('Kodni qayta yuborish',
+                                style: TextStyle(
+                                    fontSize: 14.5,
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                  ),
+                ] else ...[
+                  _phoneChip(),
+                  const SizedBox(height: 20),
+                  const Text('Yangi parol',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _newPassController,
+                    focusNode: _newPassFocus,
+                    obscureText: _obscureNew,
+                    keyboardType: TextInputType.visiblePassword,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    onChanged: (_) => setState(() => _passError = null),
+                    decoration: _passDecoration('Kamida 6 ta belgi', _obscureNew,
+                        () => setState(() => _obscureNew = !_obscureNew)),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Yangi parolni takrorlang',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _confirmPassController,
+                    obscureText: _obscureConfirm,
+                    keyboardType: TextInputType.visiblePassword,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    onChanged: (_) => setState(() => _passError = null),
+                    onSubmitted: (_) => _savePassword(),
+                    decoration: _passDecoration(
+                        'Parolni qayta kiriting',
+                        _obscureConfirm,
+                        () => setState(
+                            () => _obscureConfirm = !_obscureConfirm)),
+                  ),
+                  if (_passError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_passError!,
+                        style: const TextStyle(
+                            fontSize: 13.5,
+                            color: AppColors.error,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                  const SizedBox(height: 28),
+                  GlassGradientButton(
+                    label: 'Parolni saqlash va kirish',
+                    isLoading: _isSaving,
+                    onPressed: _canSave ? _savePassword : null,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
   @override
@@ -4674,6 +5274,24 @@ class _LoginScreenState extends State<LoginScreen> {
                     isLoading: _isLoading,
                     onPressed:
                         _passwordController.text.isNotEmpty ? _login : null,
+                  ),
+                  const SizedBox(height: 14),
+                  Center(
+                    child: GestureDetector(
+                      onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ForgotPasswordScreen(
+                                  initialPhone: _phoneController.text,
+                                  // Bu tugma faqat SMS tasdiqlangandan keyingi
+                                  // (parol) bosqichida ko'rinadi.
+                                  phoneVerified: true))),
+                      child: const Text('Parol esdan chiqdimi?',
+                          style: TextStyle(
+                              fontSize: 14.5,
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w700)),
+                    ),
                   ),
                 ],
                 const SizedBox(height: 18),
