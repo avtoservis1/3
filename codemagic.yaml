@@ -76,6 +76,36 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Set owner app icon
+        script: |
+          set -e
+          SRC=assets/app_icon_owner.png
+          if [ ! -f "$SRC" ]; then
+            echo "XATO: assets/app_icon_owner.png topilmadi. 1024x1024 PNG ni repozitoriyga qo'shing."; exit 1
+          fi
+          ICONSET=ios/Runner/Assets.xcassets/AppIcon.appiconset
+          rm -rf "$ICONSET"
+          mkdir -p "$ICONSET"
+          # 1024x1024 va alfa-kanalsiz PNG (App Store talabi)
+          sips -z 1024 1024 "$SRC" --out /tmp/icon_tmp.png
+          sips -s format jpeg /tmp/icon_tmp.png --out /tmp/icon_tmp.jpg
+          sips -s format png /tmp/icon_tmp.jpg --out "$ICONSET/icon-1024.png"
+          cat > "$ICONSET/Contents.json" <<'JSON'
+          {
+            "images" : [
+              {
+                "filename" : "icon-1024.png",
+                "idiom" : "universal",
+                "platform" : "ios",
+                "size" : "1024x1024"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          JSON
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
@@ -121,6 +151,36 @@ workflows:
           fi
       - name: Get Flutter packages
         script: flutter pub get
+      - name: Set admin app icon
+        script: |
+          set -e
+          SRC=assets/app_icon_admin.png
+          if [ ! -f "$SRC" ]; then
+            echo "assets/app_icon_admin.png yo'q: standart ikonka ishlatiladi."; exit 0
+          fi
+          ICONSET=ios/Runner/Assets.xcassets/AppIcon.appiconset
+          rm -rf "$ICONSET"
+          mkdir -p "$ICONSET"
+          # 1024x1024 va alfa-kanalsiz PNG (App Store talabi)
+          sips -z 1024 1024 "$SRC" --out /tmp/icon_tmp.png
+          sips -s format jpeg /tmp/icon_tmp.png --out /tmp/icon_tmp.jpg
+          sips -s format png /tmp/icon_tmp.jpg --out "$ICONSET/icon-1024.png"
+          cat > "$ICONSET/Contents.json" <<'JSON'
+          {
+            "images" : [
+              {
+                "filename" : "icon-1024.png",
+                "idiom" : "universal",
+                "platform" : "ios",
+                "size" : "1024x1024"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          JSON
       - name: Set up code signing and build IPA
         script: |
           xcode-project use-profiles
