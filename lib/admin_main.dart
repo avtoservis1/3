@@ -23,10 +23,16 @@ import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: kIsWeb ? DefaultFirebaseOptions.web : null,
-  );
-  await PushNotificationService.initialize();
+
+  // Firebase xatosi yoki sekinligi ilovani ishga tushirish ekranida abadiy
+  // ushlab qolmasligi uchun timeout va try/catch bilan himoyalaymiz.
+  try {
+    await Firebase.initializeApp(
+      options: kIsWeb ? DefaultFirebaseOptions.web : null,
+    ).timeout(const Duration(seconds: 10));
+  } catch (e) {
+    debugPrint('Firebase.initializeApp xatosi yoki timeout: $e');
+  }
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -36,7 +42,15 @@ void main() async {
     ),
   );
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+  // Interfeysni DARHOL chizamiz. Push xizmati (APNs ruxsat so'rovi) orqa fonda,
+  // runApp() dan KEYIN sozlanadi - u xato bersa yoki kutib qolsa ham ilova
+  // ishga tushirish ekranida qotib qolmaydi.
   runApp(const AdminApp());
+
+  PushNotificationService.initialize().catchError((e) {
+    debugPrint('PushNotificationService xatosi: $e');
+  });
 }
 
 // ============================================================================
@@ -1006,19 +1020,31 @@ class PushNotificationService {
 
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundMessageHandler);
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _localNotifications.initialize(initSettings);
-    const channel = AndroidNotificationChannel(
-      _androidChannelId,
-      'Asosiy bildirishnomalar',
-      description: 'Yangi ariza va boshqa xabarlar',
-      importance: Importance.high,
-    );
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+    // Lokal bildirishnomalar xato bersa ham, quyidagi FCM ruxsat so'rovi
+    // baribir bajarilishi uchun alohida try/catch ichida.
+    try {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      const initSettings =
+          InitializationSettings(android: androidInit, iOS: iosInit);
+      await _localNotifications.initialize(initSettings);
+      const channel = AndroidNotificationChannel(
+        _androidChannelId,
+        'Asosiy bildirishnomalar',
+        description: 'Yangi ariza va boshqa xabarlar',
+        importance: Importance.high,
+      );
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+    } catch (e) {
+      debugPrint('Lokal bildirishnoma sozlash xatosi: $e');
+    }
 
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
@@ -1038,6 +1064,9 @@ class PushNotificationService {
           notification?.title ?? message.data['title'] ?? 'Yangi xabar';
       final body = notification?.body ?? message.data['body'] ?? '';
       if (title.isEmpty && body.isEmpty) return;
+      // iOS'da ochiq ilovada xabarni FCM o'zi ko'rsatadi (yuqoridagi
+      // setForegroundNotificationPresentationOptions), takrorlanmasin.
+      if (defaultTargetPlatform == TargetPlatform.iOS) return;
       _localNotifications.show(
         message.hashCode,
         title,
