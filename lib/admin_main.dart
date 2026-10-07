@@ -732,6 +732,72 @@ class AdminApi {
     }
   }
 
+  // ---- Servis qo'shish (faqat admin) va servislardagi ustalar ----
+  static Future<Map<String, dynamic>> createService(
+      Map<String, dynamic> fields) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/admin/services'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(fields),
+      );
+      if (res.statusCode == 200) {
+        return {'success': true, 'data': jsonDecode(res.body)};
+      }
+      String message = 'Servisni qo\'shib bo\'lmadi';
+      try {
+        final detail = jsonDecode(res.body)['detail'];
+        if (detail is String && detail.isNotEmpty) message = detail;
+      } catch (_) {}
+      return {'success': false, 'message': message};
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
+  static Future<List<dynamic>> staff({String? status}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/admin/staff').replace(
+          queryParameters: status != null ? {'status': status} : null);
+      final res = await http.get(uri);
+      if (res.statusCode == 200) return jsonDecode(res.body) as List<dynamic>;
+    } catch (_) {}
+    return [];
+  }
+
+  static Future<bool> approveStaff(int id) async {
+    try {
+      final res =
+          await http.put(Uri.parse('$baseUrl/api/admin/staff/$id/approve'));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> rejectStaff(int id, String reason) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/api/admin/staff/$id/reject'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'reason': reason}),
+      );
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> removeStaff(int id) async {
+    try {
+      final res =
+          await http.delete(Uri.parse('$baseUrl/api/admin/staff/$id'));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Admin ustani (servis egasi/evakuator/benzin dastavka) o'zi qo'shadi.
   // Telefon OTP so'ralmaydi; server ustaga login/parolni SMS bilan yuboradi.
   static Future<Map<String, dynamic>> createServiceOwner(
@@ -1668,7 +1734,7 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
             icon: Icons.build_rounded,
             color: AppColors.success,
             title: 'Tasdiqlash',
-            subtitle: 'Servis egalari qo\'shgan yangi xizmatlar',
+            subtitle: 'Ustalar qo\'shgan yangi xizmatlar',
             onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -2350,7 +2416,7 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
   // ko'rsatish va shu bo'yicha filtrlash uchun.
   final List<Map<String, String?>> _typeFilters = [
     {'label': 'Hammasi', 'value': null, 'icon': null},
-    {'label': 'Avtoservis', 'value': 'auto_service', 'icon': null},
+    {'label': 'Ustalar', 'value': 'staff', 'icon': null},
     {'label': 'Evakuator', 'value': 'evacuator', 'icon': null},
     {'label': 'Benzin dastavka', 'value': 'fuel', 'icon': null},
   ];
@@ -2358,6 +2424,12 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
 
   List<dynamic> _services = [];
   bool _loading = true;
+
+  // "Ustalar" filtrida faqat ustalar arizalari (ServiceStaff), "Hammasi"da servislar
+  // va ustalar arizalari BIRGA ko'rsatiladi. Usta yozuvlari '_kind' == 'staff' bilan belgilanadi.
+  List<dynamic> _tagStaff(List<dynamic> list) => list
+      .map((e) => <String, dynamic>{...(e as Map<String, dynamic>), '_kind': 'staff'})
+      .toList();
 
   @override
   void initState() {
@@ -2367,10 +2439,22 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final data = await AdminApi.services(
-      status: _filters[_filterIndex]['value'],
-      providerType: _typeFilters[_typeFilterIndex]['value'],
-    );
+    final status = _filters[_filterIndex]['value'];
+    final typeValue = _typeFilters[_typeFilterIndex]['value'];
+    List<dynamic> data;
+    if (typeValue == 'staff') {
+      data = _tagStaff(await AdminApi.staff(status: status));
+    } else if (typeValue == null) {
+      final results = await Future.wait([
+        AdminApi.services(status: status, providerType: null),
+        AdminApi.staff(status: status),
+      ]);
+      data = [...results[0], ..._tagStaff(results[1])];
+      data.sort((a, b) => '${(b as Map)['created_at'] ?? ''}'
+          .compareTo('${(a as Map)['created_at'] ?? ''}'));
+    } else {
+      data = await AdminApi.services(status: status, providerType: typeValue);
+    }
     if (!mounted) return;
     setState(() {
       _services = data;
@@ -2383,16 +2467,30 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+          child: Text('Servis arizalari',
+              style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+        ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+          child: Wrap(
             children: [
-              const Expanded(
-                child: Text('Servis arizalari',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary)),
+              TextButton.icon(
+                onPressed: () async {
+                  final created = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const AdminCreateServiceScreen()),
+                  );
+                  if (created == true) _load();
+                },
+                icon: const Icon(Icons.add_business_rounded, size: 18),
+                label: const Text('Servis qo\'shish',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
               ),
               TextButton.icon(
                 onPressed: () async {
@@ -2405,6 +2503,15 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
                 },
                 icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
                 label: const Text('Usta qo\'shish',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminStaffScreen()),
+                ),
+                icon: const Icon(Icons.groups_2_outlined, size: 18),
+                label: const Text('Ustalar',
                     style: TextStyle(fontWeight: FontWeight.w700)),
               ),
             ],
@@ -2513,13 +2620,171 @@ class _AdminServicesTabState extends State<AdminServicesTab> {
                           final s = _services[i] as Map<String, dynamic>;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: _serviceCard(s),
+                            child: s['_kind'] == 'staff' ? _staffCard(s) : _serviceCard(s),
                           );
                         },
                       ),
           ),
         ),
       ],
+    );
+  }
+
+  void _staffToast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _staffApprove(Map s) async {
+    final ok = await AdminApi.approveStaff(s['id'] as int);
+    if (!mounted) return;
+    _staffToast(ok ? 'Usta tasdiqlandi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  Future<void> _staffReject(Map s) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Arizani rad etish'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'Rad etish sababi'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Bekor qilish')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Rad etish')),
+        ],
+      ),
+    );
+    if (reason == null) return;
+    final ok = await AdminApi.rejectStaff(s['id'] as int, reason);
+    if (!mounted) return;
+    _staffToast(ok ? 'Ariza rad etildi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  Future<void> _staffRemove(Map s) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Ustani servisdan chiqarish'),
+        content: Text(
+            '${s['name']} ${s['service_name']} servisidan chiqariladi (akkaunti o\'chmaydi). Davom etasizmi?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Yo\'q')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ha, chiqarish')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final ok = await AdminApi.removeStaff(s['id'] as int);
+    if (!mounted) return;
+    _staffToast(ok ? 'Usta servisdan chiqarildi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  Widget _staffCard(Map s) {
+    final status = '${s['status']}';
+    final svcName = '${s['service_name'] ?? ''}';
+    final svcAddr = '${s['service_address'] ?? ''}';
+    final svcLine = svcAddr.isNotEmpty ? '$svcName — $svcAddr' : svcName;
+    final Color color = status == 'approved'
+        ? AppColors.success
+        : (status == 'rejected' ? AppColors.error : AppColors.warning);
+    final String label = status == 'approved'
+        ? 'Tasdiqlangan'
+        : (status == 'rejected' ? 'Rad etilgan' : 'Kutilmoqda');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('${s['name'] ?? ''}',
+                    style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Text(label,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: color)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('${s['phone'] ?? ''}',
+              style: const TextStyle(
+                  fontSize: 13.5, color: AppColors.textSecondary)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.storefront_outlined,
+                  size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(svcLine,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          if (status == 'rejected' &&
+              '${s['reject_reason'] ?? ''}'.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Sabab: ${s['reject_reason']}',
+                style: const TextStyle(fontSize: 12.5, color: AppColors.error)),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (status == 'pending') ...[
+                TextButton(
+                    onPressed: () => _staffReject(s),
+                    child: const Text('Rad etish',
+                        style: TextStyle(color: AppColors.error))),
+                const SizedBox(width: 4),
+                FilledButton(
+                    onPressed: () => _staffApprove(s),
+                    child: const Text('Tasdiqlash')),
+              ] else
+                TextButton(
+                    onPressed: () => _staffRemove(s),
+                    child: const Text('Servisdan chiqarish',
+                        style: TextStyle(color: AppColors.error))),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -2847,7 +3112,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
   String _roleLabel(String? role) {
     switch (role) {
       case 'service_owner':
-        return 'Servis egasi';
+        return 'Usta';
       case 'admin':
         return 'Admin';
       default:
@@ -4176,7 +4441,7 @@ class _AdminServiceTypesTabState extends State<AdminServiceTypesTab> {
                             color: AppColors.textPrimary)),
                     const SizedBox(height: 4),
                     const Text(
-                      'Nomi va narxini shu yerda siz belgilaysiz. Servis egalari faqat shu ro\'yxatdan o\'zida bor turlarni tanlaydi.',
+                      'Nomi va narxini shu yerda siz belgilaysiz. Ustalar faqat shu ro\'yxatdan o\'zida bor turlarni tanlaydi.',
                       style: TextStyle(
                           fontSize: 13, color: AppColors.textSecondary),
                     ),
@@ -4729,7 +4994,6 @@ class _LocationFormDialogState extends State<_LocationFormDialog> {
   double? _lat;
   double? _lng;
   bool _saving = false;
-  final _mapController = MapController();
 
   @override
   void initState() {
@@ -4777,8 +5041,6 @@ class _LocationFormDialogState extends State<_LocationFormDialog> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
-    final initialCenter =
-        LatLng(_lat ?? 41.311081, _lng ?? 69.240562); // Toshkent markazi
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Padding(
@@ -4810,56 +5072,21 @@ class _LocationFormDialogState extends State<_LocationFormDialog> {
                   decoration: const InputDecoration(
                       hintText: 'Masalan: Chilonzor tumani, 5-kvartal')),
               const SizedBox(height: 14),
-              const Text('Xaritadan joylashuvni belgilang:',
+              const Text('Joylashuvni belgilang:',
                   style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
-                  height: 220,
-                  child: Stack(
-                    children: [
-                      FlutterMap(
-                        mapController: _mapController,
-                        options: MapOptions(
-                          initialCenter: initialCenter,
-                          initialZoom: _lat != null ? 15 : 10,
-                          onTap: (tapPosition, point) {
-                            setState(() {
-                              _lat = point.latitude;
-                              _lng = point.longitude;
-                            });
-                          },
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate:
-                                'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'com.avtoservis.admin',
-                          ),
-                          if (_lat != null && _lng != null)
-                            MarkerLayer(markers: [
-                              Marker(
-                                point: LatLng(_lat!, _lng!),
-                                width: 40,
-                                height: 40,
-                                child: const Icon(Icons.location_pin,
-                                    color: AppColors.error, size: 36),
-                              ),
-                            ]),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _lat != null && _lng != null
-                    ? 'Tanlangan: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}'
-                    : 'Joylashuv hali belgilanmagan - xaritaga bosing',
-                style: const TextStyle(
-                    fontSize: 12.5, color: AppColors.textSecondary),
+              AdminMapPicker(
+                initialLat: _lat,
+                initialLng: _lng,
+                height: 220,
+                onChanged: (lat, lng, address) => setState(() {
+                  _lat = lat;
+                  _lng = lng;
+                  if (address != null &&
+                      _addressController.text.trim().isEmpty) {
+                    _addressController.text = address;
+                  }
+                }),
               ),
               const SizedBox(height: 20),
               GlassGradientButton(
@@ -4938,7 +5165,7 @@ class _AdminOfferedServicesTabState extends State<AdminOfferedServicesTab> {
                           color: AppColors.textPrimary)),
                   const SizedBox(height: 4),
                   const Text(
-                    'Servis egalari qo\'shgan yangi xizmatlar shu yerda ko\'rinadi.',
+                    'Ustalar qo\'shgan yangi xizmatlar shu yerda ko\'rinadi.',
                     style:
                         TextStyle(fontSize: 13, color: AppColors.textSecondary),
                   ),
@@ -5534,7 +5761,7 @@ class _RejectReasonDialogState extends State<_RejectReasonDialog> {
                     fontWeight: FontWeight.w800,
                     color: AppColors.textPrimary)),
             const SizedBox(height: 6),
-            const Text('Servis egasiga ko\'rsatiladigan sababni yozing.',
+            const Text('Ustaga ko\'rsatiladigan sababni yozing.',
                 style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
             const SizedBox(height: 16),
             TextField(
@@ -5595,6 +5822,8 @@ class _AdminServiceEditScreenState extends State<AdminServiceEditScreen> {
   TimeOfDay? _workingHoursTo;
   String _dayOff = '';
   bool _saving = false;
+  double? _lat;
+  double? _lng;
 
   static const _days = [
     'Dam olish kuni yo\'q',
@@ -5652,6 +5881,8 @@ class _AdminServiceEditScreenState extends State<AdminServiceEditScreen> {
     }
     final existingDayOff = widget.service['day_off']?.toString() ?? '';
     _dayOff = _days.contains(existingDayOff) ? existingDayOff : '';
+    _lat = (widget.service['latitude'] as num?)?.toDouble();
+    _lng = (widget.service['longitude'] as num?)?.toDouble();
   }
 
   @override
@@ -5691,11 +5922,17 @@ class _AdminServiceEditScreenState extends State<AdminServiceEditScreen> {
       'name': _name.text.trim(),
       'owner_name': _ownerName.text.trim(),
       'phone': _phone.text.trim(),
-      'working_hours': _workingHours ?? '',
-      'day_off': _dayOff,
-      if (_isAutoService)
-        'address': _address.text.trim()
-      else
+      if (!_isAutoService) ...{
+        'working_hours': _workingHours ?? '',
+        'day_off': _dayOff,
+      },
+      if (_isAutoService) ...{
+        'address': _address.text.trim(),
+        if (_lat != null && _lng != null) ...{
+          'latitude': _lat,
+          'longitude': _lng,
+        },
+      } else
         'car_model': _carModel.text.trim(),
       if (!_isAutoService)
         'price': double.tryParse(_price.text.trim().replaceAll(' ', '')),
@@ -5755,6 +5992,19 @@ class _AdminServiceEditScreenState extends State<AdminServiceEditScreen> {
                   if (_isAutoService) ...[
                     _label('Manzil'),
                     TextField(controller: _address, maxLines: 2),
+                    const SizedBox(height: 16),
+                    _label('Joylashuv (qidiring yoki xaritaga bosing)'),
+                    AdminMapPicker(
+                      initialLat: _lat,
+                      initialLng: _lng,
+                      onChanged: (lat, lng, address) => setState(() {
+                        _lat = lat;
+                        _lng = lng;
+                        if (address != null && _address.text.trim().isEmpty) {
+                          _address.text = address;
+                        }
+                      }),
+                    ),
                   ] else ...[
                     _label('Mashina rusmi (turi)'),
                     TextField(
@@ -5801,12 +6051,14 @@ class _AdminServiceEditScreenState extends State<AdminServiceEditScreen> {
                               color: AppColors.primary)),
                     ),
                   ],
-                  const SizedBox(height: 16),
-                  _label('Ish vaqti'),
-                  _workingHoursPicker(),
-                  const SizedBox(height: 16),
-                  _label('Dam olish kuni'),
-                  _dayOffPicker(),
+                  if (!_isAutoService) ...[
+                    const SizedBox(height: 16),
+                    _label('Ish vaqti'),
+                    _workingHoursPicker(),
+                    const SizedBox(height: 16),
+                    _label('Dam olish kuni'),
+                    _dayOffPicker(),
+                  ],
                 ],
               ),
             ),
@@ -6420,9 +6672,161 @@ class _AdminStatisticsTabState extends State<AdminStatisticsTab> {
                     '${_stats!['most_active_service']['count'] ?? 0} ta buyurtma qabul qilingan',
               ),
             ],
+            const SizedBox(height: 20),
+            _revenueSection(),
           ],
         ],
       ),
+    );
+  }
+
+  String _money(num v) {
+    final s = v.round().toString();
+    final buf = StringBuffer();
+    for (int i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) buf.write(' ');
+      buf.write(s[i]);
+    }
+    return '$buf so\'m';
+  }
+
+  String _providerLabel(dynamic t) {
+    switch ('$t') {
+      case 'evacuator':
+        return 'Evakuator';
+      case 'fuel':
+        return 'Benzin dastavka';
+      default:
+        return 'Avtoservis';
+    }
+  }
+
+  Widget _revenueRow(String title, String subtitle, num revenue, int completed) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(_money(revenue),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.success)),
+              const SizedBox(height: 2),
+              Text('$completed ta yakunlangan',
+                  style: const TextStyle(
+                      fontSize: 11.5, color: AppColors.textMuted)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _revenueSection() {
+    final totals = (_stats!['revenue_totals'] as Map?) ?? {};
+    final services = (_stats!['services_revenue'] as List?) ?? [];
+    final masters = (_stats!['masters_revenue'] as List?) ?? [];
+    final total = (totals['total_revenue'] as num?) ?? 0;
+    final completed = (totals['completed_orders'] as num?)?.toInt() ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _highlightCard(
+          icon: Icons.account_balance_wallet_rounded,
+          color: AppColors.success,
+          title: 'Jami daromad',
+          value: _money(total),
+          subtitle: '$completed ta yakunlangan buyurtma',
+        ),
+        const SizedBox(height: 16),
+        const Text('Servislar bo\'yicha daromad',
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+        const SizedBox(height: 10),
+        LiquidGlass(
+          radius: 18,
+          tintOpacity: 0.9,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: services.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text('Ma\'lumot yo\'q',
+                      style: TextStyle(color: AppColors.textMuted)))
+              : Column(
+                  children: services.map((e) {
+                    final m = e as Map<String, dynamic>;
+                    final staff = (m['staff_count'] as num?)?.toInt() ?? 0;
+                    final sub = m['provider_type'] == 'auto_service'
+                        ? '${_providerLabel(m['provider_type'])} • $staff usta • ${m['orders'] ?? 0} ta buyurtma'
+                        : '${_providerLabel(m['provider_type'])} • ${m['orders'] ?? 0} ta buyurtma';
+                    return _revenueRow(
+                        '${m['name'] ?? ''}',
+                        sub,
+                        (m['revenue'] as num?) ?? 0,
+                        (m['completed'] as num?)?.toInt() ?? 0);
+                  }).toList(),
+                ),
+        ),
+        const SizedBox(height: 16),
+        const Text('Ustalar bo\'yicha daromad',
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+        const SizedBox(height: 10),
+        LiquidGlass(
+          radius: 18,
+          tintOpacity: 0.9,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+          child: masters.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text('Ma\'lumot yo\'q',
+                      style: TextStyle(color: AppColors.textMuted)))
+              : Column(
+                  children: masters.map((e) {
+                    final m = e as Map<String, dynamic>;
+                    final svc = '${m['service_name'] ?? ''}';
+                    final sub = svc.isEmpty
+                        ? '${m['phone'] ?? ''}'
+                        : '$svc • ${m['orders'] ?? 0} ta buyurtma';
+                    return _revenueRow(
+                        '${m['name'] ?? ''}',
+                        sub,
+                        (m['revenue'] as num?) ?? 0,
+                        (m['completed'] as num?)?.toInt() ?? 0);
+                  }).toList(),
+                ),
+        ),
+      ],
     );
   }
 
@@ -6478,12 +6882,172 @@ class _AdminStatisticsTabState extends State<AdminStatisticsTab> {
 
 
 // ============================================================================
-// USTA QO'SHISH — admin ustani (avtoservis / evakuator / benzin dastavka) o'zi
-// ro'yxatdan o'tkazadi: ism, telefon, parol, joylashuv va h.k. Telefon SMS
-// bilan tasdiqlanmaydi. Saqlangach server ustaning raqamiga "admin tomonidan
-// ro'yxatdan o'tkazildingiz" SMS'ini login (telefon) va parol bilan yuboradi.
-// Usta GoFix usta ilovasiga shu ma'lumotlar bilan kirganda esa odatdagidek
-// SMS OTP (telefonni tasdiqlash) ishlaydi.
+// SERVIS QO'SHISH — servislarni FAQAT admin yaratadi (nomi, manzili, xaritadagi
+// joylashuvi, logotipi, ish vaqti, xizmat turlari). Ustalar keyin ro'yxatdan
+// o'tishda shu servislardan birini tanlaydi; bitta servisda istalgancha usta
+// ishlashi mumkin.
+// ============================================================================
+class AdminCreateServiceScreen extends StatefulWidget {
+  const AdminCreateServiceScreen({super.key});
+  @override
+  State<AdminCreateServiceScreen> createState() =>
+      _AdminCreateServiceScreenState();
+}
+
+class _AdminCreateServiceScreenState extends State<AdminCreateServiceScreen> {
+  // Servisga ish vaqti, dam olish kuni, telefon va xizmat turlari kiritilmaydi:
+  // ularni har bir usta o'zi (yoki admin usta qo'shayotganda) belgilaydi.
+  final _name = TextEditingController();
+  final _address = TextEditingController();
+
+  double? _lat;
+  double? _lng;
+  String? _logo;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _address.dispose();
+    super.dispose();
+  }
+
+  void _error(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (_saving) return;
+    if (_name.text.trim().isEmpty) return _error('Servis nomini kiriting');
+    if (_address.text.trim().isEmpty) return _error('Manzilni kiriting');
+    if (_lat == null || _lng == null) {
+      return _error('Qidiring yoki xaritaga bosib joylashuvni belgilang');
+    }
+
+    final body = <String, dynamic>{
+      'name': _name.text.trim(),
+      'address': _address.text.trim(),
+      'latitude': _lat,
+      'longitude': _lng,
+      if (_logo != null && _logo!.startsWith('data:')) 'logo_base64': _logo,
+    };
+
+    setState(() => _saving = true);
+    final result = await AdminApi.createService(body);
+    if (!mounted) return;
+    setState(() => _saving = false);
+
+    if (result['success'] != true) {
+      return _error(result['message']?.toString() ?? 'Xatolik yuz berdi');
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Servis qo\'shildi')),
+    );
+    Navigator.pop(context, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 20, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          size: 20),
+                      onPressed: () => Navigator.pop(context)),
+                  const Text('Servis qo\'shish',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                children: [
+                  _label('Servis nomi'),
+                  TextField(
+                      controller: _name,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                          hintText: 'Masalan: Bobur Avto Servis')),
+                  const SizedBox(height: 16),
+                  _label('Joylashuv (qidiring yoki xaritaga bosing)'),
+                  AdminMapPicker(
+                    initialLat: _lat,
+                    initialLng: _lng,
+                    onChanged: (lat, lng, address) => setState(() {
+                      _lat = lat;
+                      _lng = lng;
+                      if (address != null && _address.text.trim().isEmpty) {
+                        _address.text = address;
+                      }
+                    }),
+                  ),
+                  const SizedBox(height: 16),
+                  _label('Manzil'),
+                  TextField(
+                      controller: _address,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                          hintText: 'Masalan: Samarqand, Registon ko\'chasi 5')),
+                  const SizedBox(height: 16),
+                  AdminImagePickerField(
+                    label: 'Servis logotipi',
+                    imageBase64: _logo,
+                    fallbackIcon: Icons.storefront_outlined,
+                    onChanged: (v) => setState(
+                        () => _logo = (v == null || v.isEmpty) ? null : v),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                      'Ish vaqti, dam olish kuni, telefon va xizmat turlarini servisda ishlaydigan usta belgilaydi.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: GlassGradientButton(
+                  label: 'Servisni qo\'shish',
+                  isLoading: _saving,
+                  onPressed: _submit),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _label(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(text,
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary)),
+      );
+}
+
+// ============================================================================
+// USTA QO'SHISH — admin ustani ro'yxatdan o'tkazadi: ism, familiya, telefon,
+// parol va u ishlaydigan TAYYOR servis (admin oldindan yaratgan servislar
+// ro'yxatidan tanlanadi). Telefon SMS bilan tasdiqlanmaydi; saqlangach server
+// ustaning raqamiga "admin tomonidan ro'yxatdan o'tkazildingiz" SMS'ini login
+// va parol bilan yuboradi. Usta ilovaga kirganda esa odatdagidek SMS OTP
+// ishlaydi. Evakuator / benzin dastavka ustalari esa o'z mashinasi bilan
+// alohida provayder bo'ladi (servis tanlanmaydi).
 // ============================================================================
 class AdminCreateServiceOwnerScreen extends StatefulWidget {
   const AdminCreateServiceOwnerScreen({super.key});
@@ -6509,20 +7073,21 @@ class _AdminCreateServiceOwnerScreenState
   final _lastName = TextEditingController();
   final _phone = TextEditingController();
   final _password = TextEditingController();
-  final _serviceName = TextEditingController();
-  final _address = TextEditingController();
   final _carModel = TextEditingController();
-  final _mapController = MapController();
+  // Avtoservis ustasi: xizmat turlari (telefon - yagona, login raqamining o'zi).
+  List<dynamic> _serviceTypes = [];
+  final Set<int> _selectedTypeIds = {};
 
   String _providerType = 'auto_service';
+  List<dynamic> _services = [];
+  bool _loadingServices = true;
+  Map<String, dynamic>? _service; // tanlangan servis
   double? _lat;
   double? _lng;
   TimeOfDay? _from;
   TimeOfDay? _to;
   String _dayOff = '';
   String? _logo;
-  List<dynamic> _serviceTypes = [];
-  final Set<int> _selectedTypeIds = {};
   bool _saving = false;
 
   bool get _isAuto => _providerType == 'auto_service';
@@ -6530,7 +7095,15 @@ class _AdminCreateServiceOwnerScreenState
   @override
   void initState() {
     super.initState();
+    _loadServices();
     _loadServiceTypes();
+  }
+
+  Future<void> _loadServiceTypes() async {
+    final types = await AdminApi.listServiceTypes();
+    if (!mounted) return;
+    setState(() => _serviceTypes =
+        types.where((t) => (t as Map)['is_active'] != false).toList());
   }
 
   @override
@@ -6539,17 +7112,18 @@ class _AdminCreateServiceOwnerScreenState
     _lastName.dispose();
     _phone.dispose();
     _password.dispose();
-    _serviceName.dispose();
-    _address.dispose();
     _carModel.dispose();
     super.dispose();
   }
 
-  Future<void> _loadServiceTypes() async {
-    final types = await AdminApi.listServiceTypes();
+  Future<void> _loadServices() async {
+    final list =
+        await AdminApi.services(status: 'approved', providerType: 'auto_service');
     if (!mounted) return;
-    setState(() => _serviceTypes =
-        types.where((t) => (t as Map)['is_active'] != false).toList());
+    setState(() {
+      _services = list;
+      _loadingServices = false;
+    });
   }
 
   String _fmtTime(TimeOfDay t) =>
@@ -6590,6 +7164,19 @@ class _AdminCreateServiceOwnerScreenState
     );
   }
 
+  Future<void> _pickService() async {
+    final picked = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (ctx) => _AdminServicePickerSheet(
+          services: _services, selectedId: _service?['id'] as int?),
+    );
+    if (picked != null) setState(() => _service = picked);
+  }
+
   Future<void> _submit() async {
     if (_saving) return;
     final digits = _phone.text.replaceAll(RegExp(r'\D'), '');
@@ -6605,12 +7192,10 @@ class _AdminCreateServiceOwnerScreenState
       return _error('Parol kamida 6 ta belgidan iborat bo\'lishi kerak');
     }
     if (_isAuto) {
-      if (_serviceName.text.trim().isEmpty) {
-        return _error('Servis nomini kiriting');
-      }
-      if (_address.text.trim().isEmpty) return _error('Manzilni kiriting');
-      if (_lat == null || _lng == null) {
-        return _error('Xaritadan joylashuvni belgilang');
+      if (_service == null) return _error('Ustani biriktirish uchun servisni tanlang (ro\'yxatdan yoki xaritadan)');
+      if (_workingHours == null) return _error('Ustaning ish vaqtini belgilang');
+      if (_selectedTypeIds.isEmpty) {
+        return _error('Ustaning kamida bitta xizmat turini tanlang');
       }
     } else if (_carModel.text.trim().isEmpty) {
       return _error('Mashina rusmini (turini) kiriting');
@@ -6623,17 +7208,19 @@ class _AdminCreateServiceOwnerScreenState
       'last_name': _lastName.text.trim(),
       'password': password,
       'provider_type': _providerType,
-      if (_workingHours != null) 'working_hours': _workingHours,
-      if (_dayOff.isNotEmpty) 'day_off': _dayOff,
-      if (_logo != null && _logo!.startsWith('data:')) 'logo_base64': _logo,
-      if (_lat != null) 'latitude': _lat,
-      if (_lng != null) 'longitude': _lng,
       if (_isAuto) ...{
-        'service_name': _serviceName.text.trim(),
-        'address': _address.text.trim(),
+        'service_id': _service!['id'],
+        'working_hours': _workingHours,
+        if (_dayOff.isNotEmpty) 'day_off': _dayOff,
         'service_type_ids': _selectedTypeIds.toList(),
-      } else
+      } else ...{
         'car_model': _carModel.text.trim(),
+        if (_workingHours != null) 'working_hours': _workingHours,
+        if (_dayOff.isNotEmpty) 'day_off': _dayOff,
+        if (_logo != null && _logo!.startsWith('data:')) 'logo_base64': _logo,
+        if (_lat != null) 'latitude': _lat,
+        if (_lng != null) 'longitude': _lng,
+      },
     };
 
     setState(() => _saving = true);
@@ -6654,7 +7241,7 @@ class _AdminCreateServiceOwnerScreenState
             ? 'Usta qo\'shildi'
             : 'Usta qo\'shildi, lekin SMS yuborilmadi'),
         content: Text(smsSent
-            ? '$phone raqamiga login va parol SMS orqali yuborildi.'
+            ? '$phone raqamiga login va parol SMS orqali yuborildi. Usta ilovada raqamini kiritadi, SMS kodni tasdiqlaydi, parolni yozadi va hech narsa to\'ldirmasdan o\'z paneliga kiradi.'
             : 'Login va parolni ustaga o\'zingiz yetkazing:\n\nTelefon: $phone\nParol: $password'),
         actions: [
           TextButton(
@@ -6730,7 +7317,7 @@ class _AdminCreateServiceOwnerScreenState
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                      'Raqam SMS orqali tasdiqlanmaydi — ustaga login va parol SMS bilan yuboriladi.',
+                      'Raqam SMS orqali tasdiqlanmaydi — ustaga login va parol SMS bilan yuboriladi. Usta ilovada raqamini SMS kod bilan tasdiqlab, parolni kiritadi va admin kiritgan ma\'lumotlar bilan o\'z paneliga kiradi.',
                       style: TextStyle(
                           fontSize: 12, color: AppColors.textSecondary)),
                   const SizedBox(height: 16),
@@ -6748,12 +7335,52 @@ class _AdminCreateServiceOwnerScreenState
                   ),
                   const SizedBox(height: 16),
                   if (_isAuto) ...[
-                    _label('Servis nomi'),
-                    TextField(controller: _serviceName),
+                    _label('Ishlaydigan servis (ro\'yxatdan yoki xaritadan)'),
+                    _servicePickBox(),
                     const SizedBox(height: 16),
-                    _label('Manzil'),
-                    TextField(controller: _address, maxLines: 2),
+                    _label('Ish vaqti'),
+                    Row(
+                      children: [
+                        Expanded(
+                            child: _timeBox('Dan', _from,
+                                () => _pickTime(isFrom: true))),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          child: Text('—',
+                              style: TextStyle(
+                                  fontSize: 16, color: AppColors.textMuted)),
+                        ),
+                        Expanded(
+                            child: _timeBox('Gacha', _to,
+                                () => _pickTime(isFrom: false))),
+                      ],
+                    ),
                     const SizedBox(height: 16),
+                    _label('Dam olish kuni'),
+                    _dayOffPicker(),
+                    if (_serviceTypes.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _label('Ustaning xizmat turlari'),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final t in _serviceTypes)
+                            FilterChip(
+                              label: Text('${(t as Map)['name'] ?? ''}'),
+                              selected:
+                                  _selectedTypeIds.contains(t['id'] as int),
+                              onSelected: (sel) => setState(() {
+                                if (sel) {
+                                  _selectedTypeIds.add(t['id'] as int);
+                                } else {
+                                  _selectedTypeIds.remove(t['id'] as int);
+                                }
+                              }),
+                            ),
+                        ],
+                      ),
+                    ],
                   ] else ...[
                     _label('Mashina rusmi (turi)'),
                     TextField(
@@ -6761,61 +7388,43 @@ class _AdminCreateServiceOwnerScreenState
                         decoration: const InputDecoration(
                             hintText: 'Masalan: Isuzu evakuator')),
                     const SizedBox(height: 16),
-                  ],
-                  _label(_isAuto
-                      ? 'Joylashuv (xaritaga bosing)'
-                      : 'Joylashuv (ixtiyoriy)'),
-                  _mapPicker(),
-                  const SizedBox(height: 16),
-                  _label('Ish vaqti'),
-                  Row(
-                    children: [
-                      Expanded(
-                          child: _timeBox('Dan', _from,
-                              () => _pickTime(isFrom: true))),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 10),
-                        child: Text('—',
-                            style: TextStyle(
-                                fontSize: 16, color: AppColors.textMuted)),
-                      ),
-                      Expanded(
-                          child: _timeBox('Gacha', _to,
-                              () => _pickTime(isFrom: false))),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _label('Dam olish kuni'),
-                  _dayOffPicker(),
-                  const SizedBox(height: 16),
-                  AdminImagePickerField(
-                    label: _isAuto ? 'Servis logotipi' : 'Mashina rasmi',
-                    imageBase64: _logo,
-                    fallbackIcon: _providerTypeIcon(_providerType),
-                    onChanged: (v) => setState(
-                        () => _logo = (v == null || v.isEmpty) ? null : v),
-                  ),
-                  if (_isAuto && _serviceTypes.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    _label('Ko\'rsatadigan xizmat turlari'),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                    _label('Joylashuv (ixtiyoriy)'),
+                    AdminMapPicker(
+                      initialLat: _lat,
+                      initialLng: _lng,
+                      onChanged: (lat, lng, address) => setState(() {
+                        _lat = lat;
+                        _lng = lng;
+                      }),
+                    ),
+                    const SizedBox(height: 16),
+                    _label('Ish vaqti'),
+                    Row(
                       children: [
-                        for (final t in _serviceTypes)
-                          FilterChip(
-                            label: Text('${(t as Map)['name'] ?? ''}'),
-                            selected:
-                                _selectedTypeIds.contains(t['id'] as int),
-                            onSelected: (sel) => setState(() {
-                              if (sel) {
-                                _selectedTypeIds.add(t['id'] as int);
-                              } else {
-                                _selectedTypeIds.remove(t['id'] as int);
-                              }
-                            }),
-                          ),
+                        Expanded(
+                            child: _timeBox('Dan', _from,
+                                () => _pickTime(isFrom: true))),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10),
+                          child: Text('—',
+                              style: TextStyle(
+                                  fontSize: 16, color: AppColors.textMuted)),
+                        ),
+                        Expanded(
+                            child: _timeBox('Gacha', _to,
+                                () => _pickTime(isFrom: false))),
                       ],
+                    ),
+                    const SizedBox(height: 16),
+                    _label('Dam olish kuni'),
+                    _dayOffPicker(),
+                    const SizedBox(height: 16),
+                    AdminImagePickerField(
+                      label: 'Mashina rasmi',
+                      imageBase64: _logo,
+                      fallbackIcon: _providerTypeIcon(_providerType),
+                      onChanged: (v) => setState(
+                          () => _logo = (v == null || v.isEmpty) ? null : v),
                     ),
                   ],
                 ],
@@ -6834,6 +7443,65 @@ class _AdminCreateServiceOwnerScreenState
     );
   }
 
+  Widget _servicePickBox() {
+    if (_loadingServices) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_services.isEmpty) {
+      return const Text(
+          'Hali servis qo\'shilmagan. Avval "Servis qo\'shish" orqali servis yarating.',
+          style: TextStyle(fontSize: 13, color: AppColors.textSecondary));
+    }
+    final s = _service;
+    return GestureDetector(
+      onTap: _pickService,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.border)),
+        child: Row(
+          children: [
+            const Icon(Icons.storefront_outlined,
+                size: 20, color: AppColors.textMuted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: s == null
+                  ? const Text('Servisni tanlang',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${s['name'] ?? ''}',
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary)),
+                        if ('${s['address'] ?? ''}'.isNotEmpty)
+                          Text('${s['address']}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textSecondary)),
+                      ],
+                    ),
+            ),
+            const Icon(Icons.keyboard_arrow_down_rounded,
+                color: AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _label(String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(text,
@@ -6842,56 +7510,6 @@ class _AdminCreateServiceOwnerScreenState
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary)),
       );
-
-  Widget _mapPicker() {
-    final center = LatLng(_lat ?? 41.311081, _lng ?? 69.240562);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: SizedBox(
-            height: 220,
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: center,
-                initialZoom: _lat != null ? 15 : 10,
-                onTap: (tapPosition, point) => setState(() {
-                  _lat = point.latitude;
-                  _lng = point.longitude;
-                }),
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.avtoservis.admin',
-                ),
-                if (_lat != null && _lng != null)
-                  MarkerLayer(markers: [
-                    Marker(
-                      point: LatLng(_lat!, _lng!),
-                      width: 40,
-                      height: 40,
-                      child: const Icon(Icons.location_pin,
-                          color: AppColors.error, size: 36),
-                    ),
-                  ]),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          _lat != null && _lng != null
-              ? 'Tanlangan: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}'
-              : 'Joylashuv hali belgilanmagan',
-          style:
-              const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-        ),
-      ],
-    );
-  }
 
   Widget _timeBox(String label, TimeOfDay? value, VoidCallback onTap) {
     return GestureDetector(
@@ -6947,6 +7565,760 @@ class _AdminCreateServiceOwnerScreenState
               setState(() => _dayOff = v == _days.first ? '' : v!),
         ),
       ),
+    );
+  }
+}
+
+// Servis tanlash oynasi: ro'yxat (qidiruv bilan) yoki xarita orqali.
+class _AdminServicePickerSheet extends StatefulWidget {
+  final List<dynamic> services;
+  final int? selectedId;
+  const _AdminServicePickerSheet(
+      {required this.services, required this.selectedId});
+  @override
+  State<_AdminServicePickerSheet> createState() =>
+      _AdminServicePickerSheetState();
+}
+
+class _AdminServicePickerSheetState extends State<_AdminServicePickerSheet> {
+  final _search = TextEditingController();
+  bool _mapView = false;
+  Map<String, dynamic>? _focused;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _select(Map<String, dynamic> s) => Navigator.pop(context, {
+        'id': s['id'],
+        'name': s['name'],
+        'address': s['address'],
+      });
+
+  LatLng? _pointOf(Map s) {
+    final lat = (s['latitude'] as num?)?.toDouble();
+    final lng = (s['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return LatLng(lat, lng);
+  }
+
+  Widget _modeToggle() {
+    Widget chip(String label, IconData icon, bool map) => Expanded(
+          child: GestureDetector(
+            onTap: () => setState(() {
+              _mapView = map;
+              _focused = null;
+            }),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: _mapView == map ? AppColors.primary : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon,
+                      size: 18,
+                      color: _mapView == map
+                          ? Colors.white
+                          : AppColors.textSecondary),
+                  const SizedBox(width: 6),
+                  Text(label,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _mapView == map
+                              ? Colors.white
+                              : AppColors.textSecondary)),
+                ],
+              ),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+      child: Row(children: [
+        chip('Ro\'yxat', Icons.view_list_rounded, false),
+        const SizedBox(width: 10),
+        chip('Xarita', Icons.map_outlined, true),
+      ]),
+    );
+  }
+
+  Widget _listView(List<dynamic> items) {
+    return items.isEmpty
+        ? const Center(
+            child: Text('Servis topilmadi',
+                style: TextStyle(color: AppColors.textMuted)))
+        : ListView.separated(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final s = items[i] as Map<String, dynamic>;
+              final selected = s['id'] == widget.selectedId;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.storefront_outlined,
+                    color: AppColors.primary),
+                title: Text('${s['name'] ?? ''}',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('${s['address'] ?? ''}',
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                trailing: selected
+                    ? const Icon(Icons.check_circle_rounded,
+                        color: AppColors.primary)
+                    : null,
+                onTap: () => _select(s),
+              );
+            },
+          );
+  }
+
+  Widget _mapBody(List<dynamic> items) {
+    final withPoint =
+        items.where((e) => _pointOf(e as Map) != null).toList();
+    final center = withPoint.isNotEmpty
+        ? _pointOf(withPoint.first as Map)!
+        : const LatLng(39.6542, 66.9597);
+    return Stack(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: center,
+                initialZoom: 12,
+                onTap: (_, __) => setState(() => _focused = null),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.avtoservis.admin',
+                ),
+                MarkerLayer(markers: [
+                  for (final e in withPoint)
+                    Marker(
+                      point: _pointOf(e as Map)!,
+                      width: 44,
+                      height: 44,
+                      alignment: Alignment.topCenter,
+                      child: GestureDetector(
+                        onTap: () => setState(
+                            () => _focused = Map<String, dynamic>.from(e)),
+                        child: Icon(Icons.location_pin,
+                            size: 44,
+                            color: (e['id'] == (_focused?['id']) ||
+                                    e['id'] == widget.selectedId)
+                                ? AppColors.primary
+                                : AppColors.error),
+                      ),
+                    ),
+                ]),
+              ],
+            ),
+          ),
+        ),
+        if (_focused != null)
+          Positioned(
+            left: 32,
+            right: 32,
+            bottom: 32,
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black26, blurRadius: 12)
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${_focused!['name'] ?? ''}',
+                      style: const TextStyle(
+                          fontSize: 15.5, fontWeight: FontWeight.w800)),
+                  if ('${_focused!['address'] ?? ''}'.isNotEmpty)
+                    Text('${_focused!['address']}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12.5, color: AppColors.textSecondary)),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                        onPressed: () => _select(_focused!),
+                        child: const Text('Shu servisni tanlash')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final q = _search.text.trim().toLowerCase();
+    final items = widget.services.where((e) {
+      final s = e as Map;
+      if (q.isEmpty) return true;
+      return '${s['name'] ?? ''}'.toLowerCase().contains(q) ||
+          '${s['address'] ?? ''}'.toLowerCase().contains(q);
+    }).toList();
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.8,
+        child: Column(
+          children: [
+            const SizedBox(height: 14),
+            Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(2))),
+            _modeToggle(),
+            if (!_mapView)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: TextField(
+                  controller: _search,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                      hintText: 'Servis nomi yoki manzil bo\'yicha qidiring',
+                      prefixIcon:
+                          Icon(Icons.search_rounded, color: AppColors.textMuted)),
+                ),
+              ),
+            Expanded(child: _mapView ? _mapBody(items) : _listView(items)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// USTALAR — servislarga biriktirilgan ustalar: yangi arizalarni tasdiqlash /
+// rad etish va ustani servisdan chiqarish.
+// ============================================================================
+class AdminStaffScreen extends StatefulWidget {
+  const AdminStaffScreen({super.key});
+  @override
+  State<AdminStaffScreen> createState() => _AdminStaffScreenState();
+}
+
+class _AdminStaffScreenState extends State<AdminStaffScreen> {
+  final List<Map<String, String?>> _filters = [
+    {'label': 'Kutilmoqda', 'value': 'pending'},
+    {'label': 'Tasdiqlangan', 'value': 'approved'},
+    {'label': 'Rad etilgan', 'value': 'rejected'},
+    {'label': 'Hammasi', 'value': null},
+  ];
+  int _filterIndex = 0;
+  List<dynamic> _items = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await AdminApi.staff(status: _filters[_filterIndex]['value']);
+    if (!mounted) return;
+    setState(() {
+      _items = data;
+      _loading = false;
+    });
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _approve(Map s) async {
+    final ok = await AdminApi.approveStaff(s['id'] as int);
+    if (!mounted) return;
+    _toast(ok ? 'Usta tasdiqlandi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  Future<void> _reject(Map s) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Arizani rad etish'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: 'Rad etish sababi'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Bekor qilish')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Rad etish')),
+        ],
+      ),
+    );
+    if (reason == null) return;
+    final ok = await AdminApi.rejectStaff(s['id'] as int, reason);
+    if (!mounted) return;
+    _toast(ok ? 'Ariza rad etildi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  Future<void> _remove(Map s) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Ustani servisdan chiqarish'),
+        content: Text(
+            '${s['name']} ${s['service_name']} servisidan chiqariladi (akkaunti o\'chmaydi). Davom etasizmi?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Yo\'q')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Ha, chiqarish')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final ok = await AdminApi.removeStaff(s['id'] as int);
+    if (!mounted) return;
+    _toast(ok ? 'Usta servisdan chiqarildi' : 'Xatolik yuz berdi');
+    if (ok) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 20, 0),
+              child: Row(
+                children: [
+                  IconButton(
+                      icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                          size: 20),
+                      onPressed: () => Navigator.pop(context)),
+                  const Text('Ustalar',
+                      style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                scrollDirection: Axis.horizontal,
+                itemCount: _filters.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final selected = i == _filterIndex;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() => _filterIndex = i);
+                      _load();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        gradient: selected
+                            ? const LinearGradient(
+                                colors: AppColors.primaryGradient)
+                            : null,
+                        color: selected ? null : AppColors.chipBg,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(_filters[i]['label']!,
+                          style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: selected
+                                  ? Colors.white
+                                  : AppColors.textSecondary)),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _items.isEmpty
+                        ? ListView(children: const [
+                            SizedBox(height: 100),
+                            Center(
+                                child: Text('Ustalar topilmadi',
+                                    style:
+                                        TextStyle(color: AppColors.textMuted))),
+                          ])
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                            itemCount: _items.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) => _card(_items[i] as Map),
+                          ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card(Map s) {
+    final status = '${s['status']}';
+    final svcName = '${s['service_name'] ?? ''}';
+    final svcAddr = '${s['service_address'] ?? ''}';
+    final svcLine = svcAddr.isNotEmpty ? '$svcName — $svcAddr' : svcName;
+    final Color color = status == 'approved'
+        ? AppColors.success
+        : (status == 'rejected' ? AppColors.error : AppColors.warning);
+    final String label = status == 'approved'
+        ? 'Tasdiqlangan'
+        : (status == 'rejected' ? 'Rad etilgan' : 'Kutilmoqda');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('${s['name'] ?? ''}',
+                    style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textPrimary)),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Text(label,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: color)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text('${s['phone'] ?? ''}',
+              style: const TextStyle(
+                  fontSize: 13.5, color: AppColors.textSecondary)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.storefront_outlined,
+                  size: 16, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                    svcLine,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          if (status == 'rejected' &&
+              '${s['reject_reason'] ?? ''}'.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text('Sabab: ${s['reject_reason']}',
+                style: const TextStyle(fontSize: 12.5, color: AppColors.error)),
+          ],
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (status == 'pending') ...[
+                TextButton(
+                    onPressed: () => _reject(s),
+                    child: const Text('Rad etish',
+                        style: TextStyle(color: AppColors.error))),
+                const SizedBox(width: 4),
+                FilledButton(
+                    onPressed: () => _approve(s),
+                    child: const Text('Tasdiqlash')),
+              ] else
+                TextButton(
+                    onPressed: () => _remove(s),
+                    child: const Text('Servisdan chiqarish',
+                        style: TextStyle(color: AppColors.error))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// XARITADAN JOYLASHUV TANLASH — qidirib yoki xaritaga bosib belgilash.
+// Admin panelda joylashuv kiritiladigan barcha joylarda (usta qo'shish, servis
+// tahrirlash, moyka/zapravka manzillari) shu bitta vidjet ishlatiladi.
+// Pin uchi aynan bosilgan nuqtada turadi (Alignment.topCenter).
+// ============================================================================
+Future<List<Map<String, dynamic>>> adminGeoSearch(String query) async {
+  final out = <Map<String, dynamic>>[];
+  try {
+    final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+      'q': query,
+      'format': 'jsonv2',
+      'limit': '6',
+      'countrycodes': 'uz',
+      'accept-language': 'uz',
+    });
+    final res = await http.get(uri, headers: {
+      'User-Agent': 'avtoservis-flutter-app'
+    }).timeout(const Duration(seconds: 10));
+    if (res.statusCode != 200) return out;
+    for (final e in jsonDecode(res.body) as List<dynamic>) {
+      final m = e as Map<String, dynamic>;
+      final lat = double.tryParse('${m['lat']}');
+      final lng = double.tryParse('${m['lon']}');
+      if (lat == null || lng == null) continue;
+      out.add({
+        'lat': lat,
+        'lng': lng,
+        'name': (m['display_name'] ?? '').toString(),
+      });
+    }
+  } catch (_) {}
+  return out;
+}
+
+class AdminMapPicker extends StatefulWidget {
+  final double? initialLat;
+  final double? initialLng;
+  final double height;
+  // address faqat qidiruv natijasi tanlanganda keladi (xaritaga bosilganda null).
+  final void Function(double lat, double lng, String? address) onChanged;
+  const AdminMapPicker({
+    super.key,
+    this.initialLat,
+    this.initialLng,
+    this.height = 240,
+    required this.onChanged,
+  });
+  @override
+  State<AdminMapPicker> createState() => _AdminMapPickerState();
+}
+
+class _AdminMapPickerState extends State<AdminMapPicker> {
+  static const LatLng _defaultCenter = LatLng(39.6542, 66.9597); // Samarqand
+
+  final MapController _mapController = MapController();
+  final TextEditingController _searchController = TextEditingController();
+  LatLng? _point;
+  List<Map<String, dynamic>> _results = [];
+  bool _searching = false;
+  bool _searched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialLat != null && widget.initialLng != null) {
+      _point = LatLng(widget.initialLat!, widget.initialLng!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final q = _searchController.text.trim();
+    if (q.length < 2 || _searching) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _searching = true;
+      _searched = true;
+    });
+    final results = await adminGeoSearch(q);
+    if (!mounted) return;
+    setState(() {
+      _results = results;
+      _searching = false;
+    });
+  }
+
+  void _selectResult(Map<String, dynamic> r) {
+    final point = LatLng(r['lat'] as double, r['lng'] as double);
+    setState(() {
+      _point = point;
+      _results = [];
+      _searched = false;
+    });
+    _mapController.move(point, 16);
+    widget.onChanged(point.latitude, point.longitude, r['name'] as String?);
+  }
+
+  void _onMapTap(LatLng point) {
+    setState(() => _point = point);
+    widget.onChanged(point.latitude, point.longitude, null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _searchController,
+          textInputAction: TextInputAction.search,
+          onSubmitted: (_) => _search(),
+          decoration: InputDecoration(
+            hintText: 'Joy nomi yoki manzilni qidiring',
+            prefixIcon:
+                const Icon(Icons.search_rounded, color: AppColors.textMuted),
+            suffixIcon: _searching
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                : IconButton(
+                    tooltip: 'Qidirish',
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    onPressed: _search),
+          ),
+        ),
+        if (_results.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border)),
+            child: Column(
+              children: [
+                for (final r in _results)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => _selectResult(r),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.place_outlined,
+                              size: 18, color: AppColors.primary),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(r['name'] as String,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    color: AppColors.textPrimary)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        else if (_searched && !_searching)
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text('Hech narsa topilmadi. Xaritaga bosib belgilang.',
+                style:
+                    TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
+          ),
+        const SizedBox(height: 10),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: SizedBox(
+            height: widget.height,
+            child: FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _point ?? _defaultCenter,
+                initialZoom: _point != null ? 16 : 12,
+                onTap: (tapPosition, point) => _onMapTap(point),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.avtoservis.admin',
+                ),
+                if (_point != null)
+                  MarkerLayer(markers: [
+                    Marker(
+                      point: _point!,
+                      width: 40,
+                      height: 40,
+                      // Pin uchi aynan belgilangan nuqtada bo'lishi uchun
+                      // marker nuqtaning tepasiga joylanadi.
+                      alignment: Alignment.topCenter,
+                      child: const Icon(Icons.location_pin,
+                          color: AppColors.error, size: 40),
+                    ),
+                  ]),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _point != null
+              ? 'Tanlangan: ${_point!.latitude.toStringAsFixed(5)}, ${_point!.longitude.toStringAsFixed(5)}'
+              : 'Joylashuv hali belgilanmagan - qidiring yoki xaritaga bosing',
+          style:
+              const TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 }
