@@ -1232,6 +1232,48 @@ class ApiService {
     }
   }
 
+  // Xizmat turi bo'yicha USTALAR ro'yxati: mijozga eng yaqin servisdagi ustalar
+  // birinchi, eng uzoqdagilari oxirida keladi.
+  static Future<Map<String, dynamic>> getMasters({
+    required double latitude,
+    required double longitude,
+    required String categoryId,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/masters').replace(queryParameters: {
+        'category': categoryId,
+        'lat': latitude.toString(),
+        'lng': longitude.toString(),
+      });
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': jsonDecode(response.body) as List};
+      }
+      return {'success': false, 'message': 'Ustalar yuklanmadi'};
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
+  // Bitta servisdagi (tanlangan xizmat turini ko'rsatadigan) ustalar - reyting bo'yicha.
+  static Future<Map<String, dynamic>> getServiceMasters(int serviceId,
+      {String? categoryId}) async {
+    try {
+      final uri = Uri.parse('$baseUrl/api/services/$serviceId/masters').replace(
+          queryParameters: {
+            if (categoryId != null && categoryId.isNotEmpty)
+              'category': categoryId,
+          });
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': jsonDecode(response.body) as List};
+      }
+      return {'success': false, 'message': 'Ustalar yuklanmadi'};
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
   static Future<Map<String, dynamic>> getServiceDetail(int serviceId) async {
     try {
       final response =
@@ -1248,6 +1290,7 @@ class ApiService {
   static Future<Map<String, dynamic>> createOrder({
     required int userId,
     required int serviceId,
+    int? masterId,
     required String category,
     String? description,
     double? userLatitude,
@@ -1264,6 +1307,7 @@ class ApiService {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'service_id': serviceId,
+          if (masterId != null) 'master_id': masterId,
           'category': category,
           if (description != null) 'description': description,
           'order_type': orderType,
@@ -2627,7 +2671,7 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                 const SizedBox(height: 24),
                 Text(
                   widget.isServiceOwner
-                      ? 'Servis egasi sifatida\nro\'yxatdan o\'tish'
+                      ? 'Usta sifatida\nro\'yxatdan o\'tish'
                       : 'Telefon raqamingizni\nkiriting',
                   style: const TextStyle(
                       fontSize: 26,
@@ -8664,7 +8708,7 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
 // ========================================================================
 // SERVICE LOCATION CHOICE SCREEN
 // Bitta xizmat turi tanlangandan keyin, mijoz albatta ikki usuldan birini
-// tanlashi kerak: xarita orqali (eng yaqinini ko'rish) yoki reyting bo'yicha.
+// tanlashi kerak: xarita orqali (eng yaqinini ko'rish) yoki ro'yxat bo'yicha.
 // ========================================================================
 
 class ServiceLocationChoiceScreen extends StatelessWidget {
@@ -8672,6 +8716,10 @@ class ServiceLocationChoiceScreen extends StatelessWidget {
   final String categoryName;
   const ServiceLocationChoiceScreen(
       {super.key, required this.categoryId, required this.categoryName});
+
+  // Admin katalogidagi xizmat turi (raqamli ID) tanlanganda mijoz servisni emas,
+  // USTANI tanlaydi (evakuator / benzin dastavka esa avvalgidek).
+  bool get _mastersFlow => int.tryParse(categoryId) != null;
 
   @override
   Widget build(BuildContext context) {
@@ -8697,8 +8745,11 @@ class ServiceLocationChoiceScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 28),
-              const Text('Servis joyini qanday tanlaysiz?',
-                  style: TextStyle(
+              Text(
+                  _mastersFlow
+                      ? 'Ustani qanday tanlaysiz?'
+                      : 'Servis joyini qanday tanlaysiz?',
+                  style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w800,
                       color: AppColors.textPrimary)),
@@ -8712,27 +8763,39 @@ class ServiceLocationChoiceScreen extends StatelessWidget {
                 context,
                 icon: Icons.map_rounded,
                 title: 'Xarita orqali tanlash',
-                subtitle:
-                    'Yaqin atrofdagi servislarni xaritada ko\'ring va eng yaqinini tanlang',
+                subtitle: _mastersFlow
+                    ? 'Servislarni xaritada ko\'ring, servisni bosib ustalarni reyting bo\'yicha ko\'ring va tanlang'
+                    : 'Yaqin atrofdagi servislarni xaritada ko\'ring va eng yaqinini tanlang',
                 onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => NearbyServicesMapScreen(
-                          categoryId: categoryId.isEmpty ? null : categoryId),
+                          categoryId: categoryId.isEmpty ? null : categoryId,
+                          categoryName: categoryName),
                     )),
               ),
               const SizedBox(height: 16),
               _choiceCard(
                 context,
-                icon: Icons.star_rounded,
-                title: 'Reyting bo\'yicha tanlash',
-                subtitle:
-                    'Eng yuqori baholangan servislar ro\'yxatidan tanlang',
+                icon: _mastersFlow
+                    ? Icons.person_search_rounded
+                    : Icons.star_rounded,
+                title: _mastersFlow
+                    ? 'Ustalar ro\'yxatidan tanlash'
+                    : 'Ro\'yxat bo\'yicha tanlash',
+                subtitle: _mastersFlow
+                    ? 'Sizga eng yaqin ustalar birinchi, eng uzoqdagilari oxirida'
+                    : 'Servislar ro\'yxatidan tanlang',
                 onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => CategoryServicesScreen(
-                          categoryId: categoryId, categoryName: categoryName),
+                      builder: (_) => _mastersFlow
+                          ? CategoryMastersScreen(
+                              categoryId: categoryId,
+                              categoryName: categoryName)
+                          : CategoryServicesScreen(
+                              categoryId: categoryId,
+                              categoryName: categoryName),
                     )),
               ),
             ],
@@ -8992,7 +9055,12 @@ class _CarServiceTypesScreenState extends State<CarServiceTypesScreen> {
         context,
         MaterialPageRoute(
             builder: (_) => ServiceLocationChoiceScreen(
-                categoryId: 'auto_service', categoryName: name)),
+                // Xizmat turining raqamli ID'si uzatiladi: shunda mijoz servisni emas,
+                // shu xizmatni ko'rsatadigan USTALARNI tanlaydi.
+                categoryId: (item['id']?.toString() ?? '').isNotEmpty
+                    ? item['id'].toString()
+                    : 'auto_service',
+                categoryName: name)),
       ),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
@@ -9842,8 +9910,10 @@ class NearbyServicesMapScreen extends StatefulWidget {
   // Berilsa, xarita to'g'ridan-to'g'ri shu servisga yo'nalish chizadi
   // (masalan buyurtma qabul qilingandan keyin "Servisga yo'nalish" tugmasidan).
   final Map<String, dynamic>? focusService;
+  // Xizmat turi nomi (xizmat turi bo'yicha tanlashda buyurtmaga uzatiladi).
+  final String? categoryName;
   const NearbyServicesMapScreen(
-      {super.key, this.categoryId, this.focusService});
+      {super.key, this.categoryId, this.focusService, this.categoryName});
   @override
   State<NearbyServicesMapScreen> createState() =>
       _NearbyServicesMapScreenState();
@@ -9976,10 +10046,21 @@ class _NearbyServicesMapScreenState extends State<NearbyServicesMapScreen> {
       _loadRouteTo(ll.LatLng((s['latitude'] as num).toDouble(),
           (s['longitude'] as num).toDouble()));
     }
+    // Xizmat turi tanlangan bo'lsa - servis ustiga bosganda shu xizmatga mos
+    // USTALAR (reyting bo'yicha) ko'rsatiladi; boshqa holatlarda avvalgidek servis kartasi.
+    final mastersFlow = widget.focusService == null &&
+        widget.categoryId != null &&
+        int.tryParse(widget.categoryId!) != null;
     showModalBottomSheet(
       context: context,
+      isScrollControlled: mastersFlow,
       backgroundColor: Colors.transparent,
-      builder: (_) => _ServiceBottomSheet(service: s),
+      builder: (_) => mastersFlow
+          ? _ServiceMastersSheet(
+              service: s,
+              categoryId: widget.categoryId!,
+              categoryName: widget.categoryName ?? '')
+          : _ServiceBottomSheet(service: s),
     );
   }
 
@@ -10133,11 +10214,16 @@ class OrderBookingScreen extends StatefulWidget {
   final String serviceName;
   final int? serviceId;
   final String category;
+  // Mijoz tanlagan usta (servisdagi aynan shu ustaga buyurtma beriladi).
+  final int? masterId;
+  final String? masterName;
   const OrderBookingScreen(
       {super.key,
       required this.serviceName,
       this.serviceId,
-      required this.category});
+      required this.category,
+      this.masterId,
+      this.masterName});
   @override
   State<OrderBookingScreen> createState() => _OrderBookingScreenState();
 }
@@ -10205,6 +10291,7 @@ class _OrderBookingScreenState extends State<OrderBookingScreen> {
     final result = await ApiService.createOrder(
       userId: userId,
       serviceId: widget.serviceId ?? 1,
+      masterId: widget.masterId,
       category: widget.category,
       description: _noteController.text.trim().isEmpty
           ? null
@@ -10296,6 +10383,29 @@ class _OrderBookingScreenState extends State<OrderBookingScreen> {
                       ),
                     ),
                     const SizedBox(height: 18),
+                    if (widget.masterName != null) ...[
+                      _label('Usta'),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppColors.border)),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_outline_rounded,
+                                color: AppColors.primary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                                child: Text(widget.masterName!,
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                    ],
                     _label('Xizmat'),
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -10966,6 +11076,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                                         _order!['service']?['address'] ?? '—'),
                                     _infoRow(Icons.phone_outlined, 'Telefon',
                                         _order!['service']?['phone'] ?? '—'),
+                                    if (_order!['master'] != null)
+                                      _infoRow(
+                                          Icons.person_outline_rounded,
+                                          'Usta',
+                                          _order!['master']['name']
+                                                  ?.toString() ??
+                                              '—'),
                                     if ((_order!['description'] as String?)
                                             ?.isNotEmpty ==
                                         true)
@@ -12319,6 +12436,424 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+// ========================================================================
+// USTALAR — xizmat turi bo'yicha buyurtma berishda mijoz servisni emas,
+// USTANI tanlaydi. Ro'yxat mijozga eng yaqin servisdagi ustalardan boshlanib,
+// eng uzoqdagilari bilan tugaydi. Xaritada esa servislar ko'rsatiladi: servis
+// ustiga bosilganda shu xizmatga mos ustalar reyting bo'yicha chiqadi.
+// ========================================================================
+
+// Tanlangan ustaga buyurtma berishni boshlaydi (servis yopiq bo'lsa ogohlantiradi).
+void bookWithMaster(
+    BuildContext context, Map<String, dynamic> master, String categoryName) {
+  if (!isAutoServiceOpenNow(master)) {
+    showServiceClosedDialog(context,
+        serviceName: master['service_name']?.toString());
+    return;
+  }
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => OrderBookingScreen(
+        serviceName: master['service_name']?.toString() ?? 'Servis',
+        serviceId: master['service_id'] as int?,
+        category: categoryName.isEmpty ? 'Xizmat' : categoryName,
+        masterId: master['master_id'] as int?,
+        masterName: master['name']?.toString(),
+      ),
+    ),
+  );
+}
+
+class _MasterTile extends StatelessWidget {
+  final Map<String, dynamic> master;
+  final bool showService;
+  final VoidCallback onTap;
+  const _MasterTile(
+      {required this.master, required this.onTap, this.showService = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final rating = (master['rating'] as num?)?.toDouble() ?? 0;
+    final reviewCount = (master['review_count'] as num?)?.toInt() ?? 0;
+    final distance = master['distance'];
+    final address = master['service_address']?.toString() ?? '';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.03),
+                blurRadius: 12,
+                offset: const Offset(0, 4))
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                  color: AppColors.primaryPale.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(14)),
+              child: const Icon(Icons.person_rounded,
+                  color: AppColors.primary, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(master['name']?.toString() ?? 'Usta',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                  if (showService) ...[
+                    const SizedBox(height: 3),
+                    Text(master['service_name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textSecondary)),
+                    if (address.isNotEmpty)
+                      Text(address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.textMuted)),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.star_rounded,
+                        size: 14, color: AppColors.warning),
+                    const SizedBox(width: 2),
+                    Text(reviewCount > 0 ? rating.toStringAsFixed(1) : '—',
+                        style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
+                  ],
+                ),
+                if (reviewCount > 0)
+                  Text('$reviewCount ta baho',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.textMuted)),
+                if (distance != null) ...[
+                  const SizedBox(height: 2),
+                  Text('$distance km',
+                      style: const TextStyle(
+                          fontSize: 11, color: AppColors.textMuted)),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Ro'yxat orqali tanlash: mijozga eng yaqin ustalar birinchi.
+class CategoryMastersScreen extends StatefulWidget {
+  final String categoryId;
+  final String categoryName;
+  const CategoryMastersScreen(
+      {super.key, required this.categoryId, required this.categoryName});
+
+  @override
+  State<CategoryMastersScreen> createState() => _CategoryMastersScreenState();
+}
+
+class _CategoryMastersScreenState extends State<CategoryMastersScreen> {
+  List<Map<String, dynamic>> _masters = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final loc = await resolveCurrentLocation();
+    final result = await ApiService.getMasters(
+      latitude: loc?.latitude ?? 39.6542,
+      longitude: loc?.longitude ?? 66.9597,
+      categoryId: widget.categoryId,
+    );
+    if (!mounted) return;
+    if (result['success'] == true) {
+      setState(() {
+        _masters = (result['data'] as List).cast<Map<String, dynamic>>();
+        _loading = false;
+      });
+    } else {
+      setState(() {
+        _error = result['message'] as String? ?? 'Ustalar yuklanmadi';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  authBackButton(context),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(widget.categoryName,
+                        style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 10, 20, 12),
+              child: Text('Sizga eng yaqin ustalar birinchi ko\'rsatiladi',
+                  style:
+                      TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            ),
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(color: AppColors.primary))
+                  : _error != null
+                      ? Center(
+                          child: Text(_error!,
+                              style: const TextStyle(
+                                  color: AppColors.textSecondary)))
+                      : _masters.isEmpty
+                          ? const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(24),
+                                child: Text(
+                                  'Bu xizmat turi bo\'yicha hozircha usta topilmadi',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: AppColors.textMuted),
+                                ),
+                              ),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _load,
+                              color: AppColors.primary,
+                              child: ListView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                                itemCount: _masters.length,
+                                itemBuilder: (context, i) => _MasterTile(
+                                  master: _masters[i],
+                                  onTap: () => bookWithMaster(
+                                      context, _masters[i], widget.categoryName),
+                                ),
+                              ),
+                            ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Xaritada servis ustiga bosilganda: shu servisdagi, tanlangan xizmatga mos
+// ustalar reyting bo'yicha (eng yuqori baholangani birinchi).
+class _ServiceMastersSheet extends StatefulWidget {
+  final Map<String, dynamic> service;
+  final String categoryId;
+  final String categoryName;
+  const _ServiceMastersSheet(
+      {required this.service,
+      required this.categoryId,
+      required this.categoryName});
+
+  @override
+  State<_ServiceMastersSheet> createState() => _ServiceMastersSheetState();
+}
+
+class _ServiceMastersSheetState extends State<_ServiceMastersSheet> {
+  List<Map<String, dynamic>> _masters = [];
+  bool _loading = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final id = widget.service['id'] as int?;
+    if (id == null) {
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+      return;
+    }
+    final result =
+        await ApiService.getServiceMasters(id, categoryId: widget.categoryId);
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (result['success'] == true) {
+        _masters = (result['data'] as List).cast<Map<String, dynamic>>();
+      } else {
+        _failed = true;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.service;
+    return Container(
+      constraints:
+          BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(4))),
+          ),
+          const SizedBox(height: 16),
+          Text(s['name']?.toString() ?? 'Servis',
+              style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 6),
+          if (s['address'] != null)
+            Row(children: [
+              const Icon(Icons.location_on_outlined,
+                  size: 16, color: AppColors.textSecondary),
+              const SizedBox(width: 4),
+              Expanded(
+                  child: Text(s['address'].toString(),
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textSecondary))),
+            ]),
+          if (s['distance'] != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text('${s['distance']} km',
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.textSecondary)),
+            ),
+          const SizedBox(height: 16),
+          const Text('Ustani tanlang',
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: 4),
+          const Text('Reytingi eng yuqori usta birinchi',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textMuted)),
+          const SizedBox(height: 12),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                  child: CircularProgressIndicator(color: AppColors.primary)),
+            )
+          else if (_failed || _masters.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Center(
+                child: Text(
+                    _failed
+                        ? 'Ustalarni yuklab bo\'lmadi'
+                        : 'Bu servisda tanlangan xizmat bo\'yicha usta topilmadi',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.textMuted)),
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _masters.length,
+                itemBuilder: (context, i) => _MasterTile(
+                  master: _masters[i],
+                  showService: false,
+                  onTap: () {
+                    final master = _masters[i];
+                    final nav = Navigator.of(context);
+                    if (!isAutoServiceOpenNow(master)) {
+                      showServiceClosedDialog(context,
+                          serviceName: master['service_name']?.toString());
+                      return;
+                    }
+                    nav.pop();
+                    nav.push(MaterialPageRoute(
+                      builder: (_) => OrderBookingScreen(
+                        serviceName:
+                            master['service_name']?.toString() ?? 'Servis',
+                        serviceId: master['service_id'] as int?,
+                        category: widget.categoryName.isEmpty
+                            ? 'Xizmat'
+                            : widget.categoryName,
+                        masterId: master['master_id'] as int?,
+                        masterName: master['name']?.toString(),
+                      ),
+                    ));
+                  },
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
