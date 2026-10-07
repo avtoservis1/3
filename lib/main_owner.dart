@@ -696,6 +696,33 @@ class ApiService {
     }
   }
 
+  /// Apple/Google reviewer test raqami: parolsiz va SMS'siz kirish (faqat telefon).
+  static Future<Map<String, dynamic>> reviewerLogin(String phone) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/login/reviewer'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'phone': phone}),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('token', data['token']);
+        await prefs.setString('user_id', data['user_id'].toString());
+        await prefs.setString('role', data['role']?.toString() ?? 'user');
+        if (data['name'] != null)
+          await prefs.setString('user_name', data['name'].toString());
+        return {'success': true, 'data': data};
+      }
+      return {
+        'success': false,
+        'message': jsonDecode(response.body)['detail'] ?? 'Kirishda xatolik'
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
   /// Login - 2-bosqich: kirishni tasdiqlovchi SMS kodni tekshiradi va
   /// muvaffaqiyatli bo'lsa tokenni prefs'ga saqlaydi.
   static Future<Map<String, dynamic>> loginVerifyOtp(
@@ -732,6 +759,8 @@ class ApiService {
     required String password,
     // "auto_service" | "evacuator" | "fuel"
     String providerType = 'auto_service',
+    // Avtoservis ustasi: ishlaydigan, admin yaratgan servisning ID'si.
+    int? serviceId,
     String? serviceName,
     String? address,
     double? latitude,
@@ -754,6 +783,7 @@ class ApiService {
           'last_name': lastName,
           'password': password,
           'provider_type': providerType,
+          if (serviceId != null) 'service_id': serviceId,
           if (serviceName != null && serviceName.isNotEmpty)
             'service_name': serviceName,
           if (address != null && address.isNotEmpty) 'address': address,
@@ -777,6 +807,21 @@ class ApiService {
       };
     } catch (e) {
       return {'success': false, 'message': 'Server bilan aloqa yo\'q'};
+    }
+  }
+
+  // Usta ro'yxatdan o'tayotganda ishlash uchun tanlaydigan servislar
+  // (admin yaratgan, tasdiqlangan avtoservislar).
+  static Future<Map<String, dynamic>> getAvailableServices() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/api/service-owner/available-services'));
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': jsonDecode(response.body)};
+      }
+      return {'success': false};
+    } catch (e) {
+      return {'success': false};
     }
   }
 
@@ -1041,10 +1086,12 @@ class ApiService {
   }
 
   // -- Service owner --
-  static Future<Map<String, dynamic>> serviceOwnerStatus(int serviceId) async {
+  static Future<Map<String, dynamic>> serviceOwnerStatus(int serviceId,
+      {int? ownerId}) async {
     try {
-      final response = await http.get(
-          Uri.parse('$baseUrl/api/service-owner/status?service_id=$serviceId'));
+      final ownerQuery = ownerId != null ? '&owner_id=$ownerId' : '';
+      final response = await http.get(Uri.parse(
+          '$baseUrl/api/service-owner/status?service_id=$serviceId$ownerQuery'));
       if (response.statusCode == 200) {
         return {'success': true, 'data': jsonDecode(response.body)};
       }
@@ -1832,8 +1879,8 @@ class ProviderTypeScreen extends StatelessWidget {
   static const _types = [
     (
       'auto_service',
-      'Avtoservis egasi',
-      'O\'z avtoservisingizni ro\'yxatdan o\'tkazing va xizmatlaringizni ko\'rsating',
+      'Avtoservis ustasi',
+      'Avtoservisda usta sifatida ro\'yxatdan o\'ting va xizmatlaringizni ko\'rsating',
       Icons.storefront_rounded,
     ),
     (
@@ -1986,8 +2033,37 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
     super.dispose();
   }
 
+  // Apple/Google reviewer test raqami: ro'yxatdan o'tish (usta, evakuator,
+  // benzin dastavka) bosqichida ham SMS, parol va anketa so'ralmaydi -
+  // raqam kiritilishi bilan to'g'ridan-to'g'ri akkauntga kirib boriladi.
+  static const String _reviewTestPhone = '+998889791000';
+
+  Future<void> _reviewerAutoLogin(String phone) async {
+    setState(() => _isLoading = true);
+    final result = await ApiService.reviewerLogin(phone);
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(result['message'] ?? 'Kirishda xatolik'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+    final data = result['data'] as Map<String, dynamic>;
+    await routeAfterAuth(context,
+        role: data['role']?.toString() ?? 'user',
+        userId: data['user_id'] as int);
+  }
+
   Future<void> _continue() async {
     if (_digits.length < 9) return;
+    if ('+998$_digits' == _reviewTestPhone) {
+      await _reviewerAutoLogin('+998$_digits');
+      return;
+    }
     setState(() => _isLoading = true);
     await ApiService.sendOtp('+998$_digits');
     setState(() => _isLoading = false);
@@ -2017,7 +2093,7 @@ class _PhoneEntryScreenState extends State<PhoneEntryScreen> {
                 const SizedBox(height: 24),
                 Text(
                   widget.isServiceOwner
-                      ? 'Servis egasi sifatida\nro\'yxatdan o\'tish'
+                      ? 'Usta sifatida\nro\'yxatdan o\'tish'
                       : 'Telefon raqamingizni\nkiriting',
                   style: const TextStyle(
                       fontSize: 26,
@@ -2580,7 +2656,6 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
   final _lastNameController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _serviceNameController = TextEditingController();
   final _carModelController = TextEditingController();
   TimeOfDay? _workingHoursFrom;
   TimeOfDay? _workingHoursTo;
@@ -2592,17 +2667,17 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
 
   String? _logoBase64;
   Uint8List? _logoPreview;
-  String? _address;
-  double? _latitude;
-  double? _longitude;
   bool _isSubmitting = false;
   String? _error;
 
-  // Ro'yxatdan o'tishda darhol tanlanadigan xizmat turlari (faqat
-  // auto_service uchun) - admin katalogidan (ServiceType) olinadi.
+  // Avtoservis ustasi: admin yaratgan servislardan tanlangan biri
+  // ({id, name, address}). Servisni usta o'zi yaratmaydi.
+  Map<String, dynamic>? _selectedService;
+
+  // Avtoservis ustasi ishlaydigan xizmat turlari (admin katalogidan tanlanadi).
   List<Map<String, dynamic>> _serviceTypes = [];
-  bool _loadingServiceTypes = true;
-  final Set<int> _selectedServiceTypeIds = {};
+  final Set<int> _selectedTypeIds = {};
+  bool _typesLoading = true;
 
   @override
   void initState() {
@@ -2614,9 +2689,10 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     final result = await ApiService.getPublicServiceTypes();
     if (!mounted) return;
     setState(() {
-      _serviceTypes =
-          (result['data'] as List? ?? []).cast<Map<String, dynamic>>();
-      _loadingServiceTypes = false;
+      _typesLoading = false;
+      if (result['success'] == true) {
+        _serviceTypes = (result['data'] as List).cast<Map<String, dynamic>>();
+      }
     });
   }
 
@@ -2637,7 +2713,6 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     _lastNameController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _serviceNameController.dispose();
     _carModelController.dispose();
     _dayOffController.dispose();
     super.dispose();
@@ -2689,17 +2764,17 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     final baseOk = _firstNameController.text.trim().isNotEmpty &&
         _lastNameController.text.trim().isNotEmpty &&
         _passwordController.text.length >= 6 &&
-        _confirmPasswordController.text == _passwordController.text &&
-        _workingHoursFrom != null &&
-        _workingHoursTo != null;
+        _confirmPasswordController.text == _passwordController.text;
     if (!baseOk) return false;
     if (_isAutoService) {
-      return _serviceNameController.text.trim().isNotEmpty &&
-          _address != null &&
-          _latitude != null &&
-          _longitude != null;
+      // Servis, ish vaqti va kamida bitta xizmat turi majburiy (dam olish kuni ixtiyoriy).
+      return _selectedService != null &&
+          _workingHoursFrom != null &&
+          _workingHoursTo != null &&
+          _selectedTypeIds.isNotEmpty;
     }
-    // Evakuator / benzin yetkazish: mashina rusmi (turi) majburiy.
+    // Evakuator / benzin yetkazish: ish vaqti va mashina rusmi (turi) majburiy.
+    if (_workingHoursFrom == null || _workingHoursTo == null) return false;
     return _carModelController.text.trim().isNotEmpty;
   }
 
@@ -2723,17 +2798,15 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     }
   }
 
-  Future<void> _pickLocation() async {
+  Future<void> _pickService() async {
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
-      MaterialPageRoute(builder: (_) => const MapPickerScreen()),
+      MaterialPageRoute(
+          builder: (_) => ServicePickerScreen(
+              selectedId: _selectedService?['id'] as int?)),
     );
     if (result == null) return;
-    setState(() {
-      _address = result['address'] as String;
-      _latitude = result['latitude'] as double;
-      _longitude = result['longitude'] as double;
-    });
+    setState(() => _selectedService = result);
   }
 
   Future<void> _submit() async {
@@ -2753,15 +2826,12 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
       lastName: _lastNameController.text.trim(),
       password: _passwordController.text,
       providerType: widget.providerType,
-      serviceName: _isAutoService ? _serviceNameController.text.trim() : null,
-      address: _isAutoService ? _address : null,
-      latitude: _isAutoService ? _latitude : null,
-      longitude: _isAutoService ? _longitude : null,
+      serviceId: _isAutoService ? _selectedService!['id'] as int : null,
       carModel: _isAutoService ? null : _carModelController.text.trim(),
       workingHours: _workingHours,
       dayOff: dayOff,
-      logoBase64: _logoBase64,
-      serviceTypeIds: _isAutoService ? _selectedServiceTypeIds.toList() : null,
+      logoBase64: _isAutoService ? null : _logoBase64,
+      serviceTypeIds: _isAutoService ? _selectedTypeIds.toList() : null,
     );
 
     setState(() => _isSubmitting = false);
@@ -2782,7 +2852,7 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     }
 
     final displayName = _isAutoService
-        ? _serviceNameController.text.trim()
+        ? (_selectedService?['name'] ?? '').toString()
         : '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}';
 
     Navigator.pushAndRemoveUntil(
@@ -2806,7 +2876,7 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
       case 'fuel':
         return 'Benzin yetkazish arizasi';
       default:
-        return 'Servis egasi arizasi';
+        return 'Usta arizasi';
     }
   }
 
@@ -2957,105 +3027,119 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
     );
   }
 
-  // ---- Avtoservis egasi uchun maydonlar ----
+  // ---- Avtoservis ustasi uchun maydonlar ----
+  // Servisni usta yaratmaydi: admin qo'shgan servislar ro'yxatidan yoki
+  // xaritadan o'zi ishlaydigan servisni tanlaydi (bitta servisda bir nechta
+  // usta ishlashi mumkin).
   List<Widget> _autoServiceFields() {
     return [
-      _sectionTitle('2', 'Servis ma\'lumotlari'),
-      const SizedBox(height: 16),
-      _label('Servis nomi'),
-      TextField(
-        controller: _serviceNameController,
-        textCapitalization: TextCapitalization.words,
-        onChanged: (_) => setState(() {}),
-        decoration: const InputDecoration(
-            hintText: 'Masalan: Bobur Avto Servis',
-            prefixIcon:
-                Icon(Icons.storefront_outlined, color: AppColors.textMuted)),
-      ),
-      const SizedBox(height: 18),
-      _label('Servis logotipi'),
-      _logoPicker('Rasm yuklash'),
-      const SizedBox(height: 18),
-      _label('Manzil'),
-      _locationPicker(),
-      const SizedBox(height: 18),
+      _sectionTitle('2', 'Ishlaydigan servis'),
+      const SizedBox(height: 6),
+      const Text(
+          'O\'zingiz ishlaydigan servisni ro\'yxatdan yoki xaritadan tanlang. Servislarni admin qo\'shadi, bitta servisda bir nechta usta ishlashi mumkin.',
+          style: TextStyle(
+              fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
+      const SizedBox(height: 14),
+      _servicePicker(),
+      const SizedBox(height: 22),
+      _sectionTitle('3', 'Ish vaqti va dam olish kuni'),
+      const SizedBox(height: 14),
       _label('Ish vaqti'),
       _workingHoursPicker(),
       const SizedBox(height: 18),
       _label('Dam olish kuni (ixtiyoriy)'),
       _dayOffPicker(),
-      const SizedBox(height: 28),
-      _sectionTitle('3', 'Xizmat turlari'),
+      const SizedBox(height: 22),
+      _sectionTitle('4', 'Qaysi xizmat turlarida ishlaysiz?'),
       const SizedBox(height: 6),
       const Text(
-          'Servisingizda mavjud bo\'lgan xizmat turlarini tanlang - mijozlar servis profilingizga kirganda shularni ko\'radi (keyinroq ham qo\'shish/o\'chirish mumkin).',
+          'Ro\'yxatdan o\'zingiz bajaradigan xizmat turlarini belgilang (kamida bittasi). Keyinroq "Xizmatlar" bo\'limidan o\'zgartirishingiz mumkin.',
           style: TextStyle(
               fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
-      const SizedBox(height: 14),
-      _serviceTypesPicker(),
+      const SizedBox(height: 12),
+      if (_typesLoading)
+        const Center(
+            child: Padding(
+                padding: EdgeInsets.all(12),
+                child: CircularProgressIndicator(color: AppColors.primary)))
+      else if (_serviceTypes.isEmpty)
+        const Text('Xizmat turlari yuklanmadi',
+            style: TextStyle(color: AppColors.textMuted))
+      else
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final t in _serviceTypes)
+              FilterChip(
+                label: Text('${t['name'] ?? ''}'),
+                selected: _selectedTypeIds.contains(t['id'] as int),
+                selectedColor: AppColors.primaryPale,
+                checkmarkColor: AppColors.primary,
+                onSelected: (sel) => setState(() {
+                  if (sel) {
+                    _selectedTypeIds.add(t['id'] as int);
+                  } else {
+                    _selectedTypeIds.remove(t['id'] as int);
+                  }
+                }),
+              ),
+          ],
+        ),
     ];
   }
 
-  Widget _serviceTypesPicker() {
-    if (_loadingServiceTypes) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
-        child:
-            Center(child: CircularProgressIndicator(color: AppColors.primary)),
-      );
-    }
-    if (_serviceTypes.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: Text('Hozircha admin xizmat turi qo\'shmagan',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
-      );
-    }
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: _serviceTypes.map((t) {
-        final id = t['id'] as int;
-        final name = t['name']?.toString() ?? 'Xizmat';
-        final selected = _selectedServiceTypeIds.contains(id);
-        return GestureDetector(
-          onTap: () => setState(() {
-            if (selected) {
-              _selectedServiceTypeIds.remove(id);
-            } else {
-              _selectedServiceTypeIds.add(id);
-            }
-          }),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: selected ? AppColors.primary : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: selected ? AppColors.primary : AppColors.border),
+  Widget _servicePicker() {
+    final selected = _selectedService;
+    return GestureDetector(
+      onTap: _pickService,
+      child: LiquidGlass(
+        radius: 16,
+        tintOpacity: 0.75,
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(
+                  gradient: LinearGradient(colors: AppColors.primaryGradient),
+                  shape: BoxShape.circle),
+              child: const Icon(Icons.storefront_outlined,
+                  color: Colors.white, size: 20),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.add_circle_outline_rounded,
-                    size: 16,
-                    color: selected ? Colors.white : AppColors.textMuted),
-                const SizedBox(width: 6),
-                Text(name,
-                    style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color:
-                            selected ? Colors.white : AppColors.textPrimary)),
-              ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: selected == null
+                  ? const Text('Servisni tanlash',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text((selected['name'] ?? '').toString(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary)),
+                        if ((selected['address'] ?? '').toString().isNotEmpty)
+                          Text((selected['address'] ?? '').toString(),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontSize: 12.5,
+                                  color: AppColors.textSecondary)),
+                      ],
+                    ),
             ),
-          ),
-        );
-      }).toList(),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
+          ],
+        ),
+      ),
     );
   }
 
@@ -3125,45 +3209,6 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                     color: AppColors.textPrimary),
-              ),
-            ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _locationPicker() {
-    return GestureDetector(
-      onTap: _pickLocation,
-      child: LiquidGlass(
-        radius: 16,
-        tintOpacity: 0.75,
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(
-                  gradient: LinearGradient(colors: AppColors.primaryGradient),
-                  shape: BoxShape.circle),
-              child:
-                  const Icon(Icons.location_on, color: Colors.white, size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Text(
-                _address ?? 'Xaritada nuqta tanlash',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: _address != null
-                        ? AppColors.textPrimary
-                        : AppColors.textMuted),
               ),
             ),
             const Icon(Icons.chevron_right_rounded, color: AppColors.textMuted),
@@ -3291,6 +3336,324 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary)),
       );
+}
+
+// ========================================================================
+// SERVIS TANLASH (usta ishlaydigan servisni ro'yxatdan yoki xaritadan tanlaydi)
+// ========================================================================
+class ServicePickerScreen extends StatefulWidget {
+  final int? selectedId;
+  const ServicePickerScreen({super.key, this.selectedId});
+  @override
+  State<ServicePickerScreen> createState() => _ServicePickerScreenState();
+}
+
+class _ServicePickerScreenState extends State<ServicePickerScreen> {
+  static const ll.LatLng _defaultCenter = ll.LatLng(39.6542, 66.9597);
+
+  final _searchController = TextEditingController();
+  List<Map<String, dynamic>> _services = [];
+  bool _loading = true;
+  bool _failed = false;
+  bool _mapView = false;
+  Map<String, dynamic>? _focused;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _failed = false;
+    });
+    final result = await ApiService.getAvailableServices();
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+      if (result['success'] == true) {
+        _services = (result['data'] as List? ?? []).cast<Map<String, dynamic>>();
+      } else {
+        _failed = true;
+      }
+    });
+  }
+
+  List<Map<String, dynamic>> get _filtered {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _services;
+    return _services.where((s) {
+      final name = (s['name'] ?? '').toString().toLowerCase();
+      final address = (s['address'] ?? '').toString().toLowerCase();
+      return name.contains(q) || address.contains(q);
+    }).toList();
+  }
+
+  ll.LatLng? _pointOf(Map<String, dynamic> s) {
+    final lat = (s['latitude'] as num?)?.toDouble();
+    final lng = (s['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return ll.LatLng(lat, lng);
+  }
+
+  void _select(Map<String, dynamic> s) {
+    Navigator.pop(context, {
+      'id': s['id'],
+      'name': s['name'],
+      'address': s['address'],
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  authBackButton(context),
+                  const SizedBox(width: 14),
+                  const Text('Servisni tanlang',
+                      style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (_) => setState(() => _focused = null),
+                decoration: const InputDecoration(
+                  hintText: 'Servis nomi yoki manzil bo\'yicha qidiring',
+                  prefixIcon:
+                      Icon(Icons.search_rounded, color: AppColors.textMuted),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('Ro\'yxat'),
+                    selected: !_mapView,
+                    onSelected: (_) => setState(() => _mapView = false),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('Xarita'),
+                    selected: _mapView,
+                    onSelected: (_) => setState(() => _mapView = true),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(child: _buildBody()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(
+          child: CircularProgressIndicator(color: AppColors.primary));
+    }
+    if (_failed) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Servislarni yuklab bo\'lmadi',
+                style: TextStyle(color: AppColors.textSecondary)),
+            const SizedBox(height: 8),
+            TextButton(onPressed: _load, child: const Text('Qayta urinish')),
+          ],
+        ),
+      );
+    }
+    final items = _filtered;
+    if (items.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+              'Servis topilmadi. Servislarni admin qo\'shadi - agar ishlaydigan servisingiz ro\'yxatda yo\'q bo\'lsa, admin bilan bog\'laning.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textMuted, height: 1.4)),
+        ),
+      );
+    }
+    return _mapView ? _buildMap(items) : _buildList(items);
+  }
+
+  Widget _buildList(List<Map<String, dynamic>> items) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (_, i) => _serviceCard(items[i], onTap: () => _select(items[i])),
+    );
+  }
+
+  Widget _serviceCard(Map<String, dynamic> s, {VoidCallback? onTap}) {
+    final isSelected = s['id'] == widget.selectedId;
+    final staff = (s['staff_count'] as num?)?.toInt() ?? 0;
+    final address = (s['address'] ?? '').toString();
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: isSelected ? AppColors.primary : AppColors.border,
+              width: isSelected ? 1.6 : 1),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: const BoxDecoration(
+                  color: AppColors.primaryPale, shape: BoxShape.circle),
+              child: const Icon(Icons.storefront_outlined,
+                  color: AppColors.primary, size: 21),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text((s['name'] ?? '').toString(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary)),
+                  if (address.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(address,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12.5, color: AppColors.textSecondary)),
+                    ),
+                  if (staff > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('$staff ta usta ishlaydi',
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.textMuted)),
+                    ),
+                ],
+              ),
+            ),
+            Icon(
+                isSelected
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+                color: isSelected ? AppColors.primary : AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMap(List<Map<String, dynamic>> items) {
+    final withPoint = items.where((s) => _pointOf(s) != null).toList();
+    final points = withPoint.map((s) => _pointOf(s)!).toList();
+    final options = points.length > 1
+        ? MapOptions(
+            initialCameraFit: CameraFit.bounds(
+              bounds: LatLngBounds.fromPoints(points),
+              padding: const EdgeInsets.all(48),
+              maxZoom: 16,
+            ),
+            onTap: (_, __) => setState(() => _focused = null),
+          )
+        : MapOptions(
+            initialCenter: points.isNotEmpty ? points.first : _defaultCenter,
+            initialZoom: points.isNotEmpty ? 15 : 11,
+            onTap: (_, __) => setState(() => _focused = null),
+          );
+
+    return Column(
+      children: [
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: FlutterMap(
+                options: options,
+                children: [
+                  osmTileLayer(),
+                  MarkerLayer(markers: [
+                    for (final s in withPoint)
+                      Marker(
+                        point: _pointOf(s)!,
+                        width: 44,
+                        height: 44,
+                        // Pin uchi aynan servis joylashgan nuqtada turadi.
+                        alignment: Alignment.topCenter,
+                        child: GestureDetector(
+                          onTap: () => setState(() => _focused = s),
+                          child: Icon(Icons.location_on,
+                              size: 44,
+                              color: identical(_focused, s) ||
+                                      s['id'] == widget.selectedId
+                                  ? AppColors.error
+                                  : AppColors.primary),
+                        ),
+                      ),
+                  ]),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          child: _focused == null
+              ? const Text('Servisni tanlash uchun xaritadagi belgini bosing',
+                  style:
+                      TextStyle(fontSize: 13, color: AppColors.textSecondary))
+              : Column(
+                  children: [
+                    _serviceCard(_focused!),
+                    const SizedBox(height: 12),
+                    GlassGradientButton(
+                        label: 'Shu servisni tanlash',
+                        onPressed: () => _select(_focused!)),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
 }
 
 // ========================================================================
@@ -4205,7 +4568,8 @@ class _ServiceOwnerPendingScreenState extends State<ServiceOwnerPendingScreen> {
 
   Future<void> _refresh() async {
     if (widget.serviceId == 0) return;
-    final result = await ApiService.serviceOwnerStatus(widget.serviceId);
+    final result = await ApiService.serviceOwnerStatus(widget.serviceId,
+        ownerId: widget.ownerId);
     if (!mounted || result['success'] != true) return;
     final data = result['data'] as Map<String, dynamic>;
     setState(() {
@@ -4853,11 +5217,10 @@ class _LoginScreenState extends State<LoginScreen> {
   // bu raqam kiritilganda na SMS, na parol so'raladi - telefon raqami
   // kiritilishi bilanoq to'g'ridan-to'g'ri akkauntga kirib boriladi.
   static const String _appleReviewTestPhone = '+998889791000';
-  static const String _appleReviewTestPassword = 'asliddin';
 
   Future<void> _autoLoginTestAccount(String phone) async {
     setState(() => _isSendingOtp = true);
-    final result = await ApiService.login(phone, _appleReviewTestPassword);
+    final result = await ApiService.reviewerLogin(phone);
     setState(() => _isSendingOtp = false);
     if (!mounted) return;
     if (result['success'] != true) {
@@ -7539,7 +7902,7 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                   ),
                   const SizedBox(height: 28),
                   _infoTile(
-                      Icons.person_outline, 'Egasi', owner?['name'] ?? '—'),
+                      Icons.person_outline, 'Usta', owner?['name'] ?? '—'),
                   _infoTile(Icons.phone_outlined, 'Telefon',
                       service?['phone'] ?? '—'),
                   if (service?['provider_type'] == 'evacuator' ||
@@ -7559,6 +7922,56 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                     _infoTile(Icons.notes_outlined, 'Tavsif',
                         service?['description']),
                   const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: Material(
+                      color: ((service?['working_hours'] ?? '').toString().isEmpty)
+                          ? AppColors.primary
+                          : AppColors.primaryPale.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(16),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () async {
+                          final changed = await Navigator.push<bool>(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) => OwnerWorkSettingsScreen(
+                                      ownerId: widget.ownerId,
+                                      service: service ?? {})));
+                          if (changed == true) _load();
+                        },
+                        child: Center(
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.edit_calendar_outlined,
+                                  size: 18,
+                                  color: ((service?['working_hours'] ?? '')
+                                          .toString()
+                                          .isEmpty)
+                                      ? Colors.white
+                                      : AppColors.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                  ((service?['working_hours'] ?? '').toString().isEmpty)
+                                      ? 'Ish vaqti va telefonni belgilang'
+                                      : 'Ish vaqti, dam olish kuni, telefon',
+                                  style: TextStyle(
+                                      color: ((service?['working_hours'] ?? '')
+                                              .toString()
+                                              .isEmpty)
+                                          ? Colors.white
+                                          : AppColors.primary,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 15)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     height: 52,
@@ -7718,8 +8131,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Akkauntni o\'chirish'),
         content: const Text(
-            'Bu amalni ortga qaytarib bo\'lmaydi. Akkauntingiz va servisingiz '
-            'e\'loni butunlay o\'chiriladi/yashiriladi. Davom etasizmi?'),
+            'Bu amalni ortga qaytarib bo\'lmaydi. Akkauntingiz va usta profilingiz '
+            'butunlay o\'chiriladi/yashiriladi. Davom etasizmi?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -7781,8 +8194,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                     color: AppColors.error.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(14)),
                 child: const Text(
-                    'Akkauntingizni o\'chirsangiz, profilingiz, servisingiz '
-                    '(e\'loningiz), barcha buyurtmalar, sharhlar va chat '
+                    'Akkauntingizni o\'chirsangiz, usta profilingiz, '
+                    'barcha buyurtmalar, sharhlar va chat '
                     'yozishmalaringiz bazadan butunlay o\'chiriladi. Bu '
                     'amalni ortga qaytarib bo\'lmaydi.',
                     style: TextStyle(
@@ -8441,6 +8854,246 @@ class _OwnerNotificationsScreenState extends State<OwnerNotificationsScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ========================================================================
+// USTA SOZLAMALARI — ish vaqti, dam olish kuni va telefon raqamini usta
+// O'ZI belgilaydi (admin servisga bularni kiritmaydi). Xizmat turlarini esa
+// "Xizmatlar" bo'limidan belgilaydi.
+// ========================================================================
+class OwnerWorkSettingsScreen extends StatefulWidget {
+  final int ownerId;
+  final Map<String, dynamic> service;
+  const OwnerWorkSettingsScreen(
+      {super.key, required this.ownerId, required this.service});
+  @override
+  State<OwnerWorkSettingsScreen> createState() =>
+      _OwnerWorkSettingsScreenState();
+}
+
+class _OwnerWorkSettingsScreenState extends State<OwnerWorkSettingsScreen> {
+  static const _days = [
+    'Dam olish kuni yo\'q',
+    'Yakshanba',
+    'Shanba',
+    'Dushanba',
+    'Seshanba',
+    'Chorshanba',
+    'Payshanba',
+    'Juma'
+  ];
+
+  final _phone = TextEditingController();
+  TimeOfDay? _from;
+  TimeOfDay? _to;
+  String _dayOff = _days.first;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final phone = (widget.service['phone'] ?? '').toString();
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    _phone.text = digits.length >= 9 ? digits.substring(digits.length - 9) : '';
+    final wh = (widget.service['working_hours'] ?? '').toString();
+    final parts = wh.split('-');
+    if (parts.length == 2) {
+      _from = _parse(parts[0]);
+      _to = _parse(parts[1]);
+    }
+    final d = (widget.service['day_off'] ?? '').toString();
+    _dayOff = _days.contains(d) && d.isNotEmpty ? d : _days.first;
+  }
+
+  @override
+  void dispose() {
+    _phone.dispose();
+    super.dispose();
+  }
+
+  TimeOfDay? _parse(String v) {
+    final hm = v.trim().split(':');
+    if (hm.length != 2) return null;
+    final h = int.tryParse(hm[0]);
+    final m = int.tryParse(hm[1]);
+    if (h == null || m == null) return null;
+    return TimeOfDay(hour: h, minute: m);
+  }
+
+  String _fmt(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  Future<void> _pick({required bool isFrom}) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: (isFrom ? _from : _to) ?? const TimeOfDay(hour: 9, minute: 0),
+      builder: (ctx, child) => MediaQuery(
+          data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+          child: child!),
+    );
+    if (picked == null) return;
+    setState(() => isFrom ? _from = picked : _to = picked);
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final digits = _phone.text.replaceAll(RegExp(r'\D'), '');
+    String? err;
+    if (_from == null || _to == null) {
+      err = 'Ish vaqtini belgilang';
+    } else if (digits.length != 9) {
+      err = 'Telefon raqamni to\'liq kiriting (9 xonali)';
+    }
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err), backgroundColor: AppColors.error));
+      return;
+    }
+    setState(() => _saving = true);
+    final result = await ApiService.updateServiceOwnerProfile(widget.ownerId, {
+      'phone': '+998$digits',
+      'working_hours': '${_fmt(_from!)}-${_fmt(_to!)}',
+      'day_off': _dayOff == _days.first ? '' : _dayOff,
+    });
+    if (!mounted) return;
+    setState(() => _saving = false);
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(result['message']?.toString() ?? 'Saqlanmadi'),
+          backgroundColor: AppColors.error));
+      return;
+    }
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Saqlandi')));
+    Navigator.pop(context, true);
+  }
+
+  Widget _label(String t) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(t,
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary)),
+      );
+
+  Widget _timeBox(String label, TimeOfDay? v, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          height: 56,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border)),
+          child: Row(children: [
+            const Icon(Icons.access_time_outlined,
+                size: 19, color: AppColors.textMuted),
+            const SizedBox(width: 10),
+            Text(v != null ? _fmt(v) : label,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: v != null
+                        ? AppColors.textPrimary
+                        : AppColors.textMuted)),
+          ]),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 20, 0),
+              child: Row(children: [
+                IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
+                    onPressed: () => Navigator.pop(context)),
+                const Text('Ish sozlamalari',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary)),
+              ]),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                children: [
+                  _label('Telefon raqamingiz'),
+                  TextField(
+                    controller: _phone,
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(9),
+                    ],
+                    decoration: const InputDecoration(
+                        prefixText: '+998 ', hintText: '90 123 45 67'),
+                  ),
+                  const SizedBox(height: 16),
+                  _label('Ish vaqti'),
+                  Row(children: [
+                    Expanded(
+                        child: _timeBox('Dan', _from, () => _pick(isFrom: true))),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 10),
+                      child: Text('—',
+                          style: TextStyle(
+                              fontSize: 16, color: AppColors.textMuted)),
+                    ),
+                    Expanded(
+                        child:
+                            _timeBox('Gacha', _to, () => _pick(isFrom: false))),
+                  ]),
+                  const SizedBox(height: 16),
+                  _label('Dam olish kuni'),
+                  Container(
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.border)),
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _dayOff,
+                        isExpanded: true,
+                        borderRadius: BorderRadius.circular(14),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        items: _days
+                            .map((d) =>
+                                DropdownMenuItem(value: d, child: Text(d)))
+                            .toList(),
+                        onChanged: (v) =>
+                            setState(() => _dayOff = v ?? _days.first),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                      'Mijozlar sizni shu ish vaqti va dam olish kuniga qarab bron qiladi. Xizmat turlarini "Xizmatlar" bo\'limidan belgilang.',
+                      style: TextStyle(
+                          fontSize: 12.5, color: AppColors.textSecondary)),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: GlassGradientButton(
+                  label: 'Saqlash', isLoading: _saving, onPressed: _save),
+            ),
+          ],
         ),
       ),
     );
