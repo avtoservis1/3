@@ -10062,9 +10062,15 @@ class _NearbyServicesMapScreenState extends State<NearbyServicesMapScreen> {
     }
     // Xizmat turi tanlangan bo'lsa - servis ustiga bosganda shu xizmatga mos
     // USTALAR (reyting bo'yicha) ko'rsatiladi; boshqa holatlarda avvalgidek servis kartasi.
-    final mastersFlow = widget.focusService == null &&
-        widget.categoryId != null &&
-        int.tryParse(widget.categoryId!) != null;
+    // Bosh sahifadagi "Yaqin atrofdagi servislar" (xizmat turisiz) ham USTALAR
+    // ro'yxatini ochadi: buyurtma servisga emas, tanlangan ustaga beriladi.
+    // Faqat evakuator/benzin dastavka va focusService holatida servis kartasi qoladi.
+    final cid = widget.categoryId;
+    final hasCategory = cid != null && int.tryParse(cid) != null;
+    final isGeneralAutoService =
+        cid == null || cid.isEmpty || cid == 'auto_service';
+    final mastersFlow =
+        widget.focusService == null && (hasCategory || isGeneralAutoService);
     showModalBottomSheet(
       context: context,
       isScrollControlled: mastersFlow,
@@ -10072,7 +10078,7 @@ class _NearbyServicesMapScreenState extends State<NearbyServicesMapScreen> {
       builder: (_) => mastersFlow
           ? _ServiceMastersSheet(
               service: s,
-              categoryId: widget.categoryId!,
+              categoryId: hasCategory ? cid! : '',
               categoryName: widget.categoryName ?? '')
           : _ServiceBottomSheet(service: s),
     );
