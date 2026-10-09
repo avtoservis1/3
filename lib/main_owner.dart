@@ -1459,19 +1459,32 @@ class PushNotificationService {
 
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundMessageHandler);
 
-    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidInit);
-    await _localNotifications.initialize(initSettings);
-    const channel = AndroidNotificationChannel(
-      _androidChannelId,
-      'Asosiy bildirishnomalar',
-      description: 'Yangi buyurtma, chat va boshqa xabarlar',
-      importance: Importance.high,
-    );
-    await _localNotifications
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+    // Lokal bildirishnomalar xato bersa ham, quyidagi FCM ruxsat so'rovi va
+    // onMessage ulanishi baribir bajarilishi uchun alohida try/catch ichida.
+    // iOS uchun DarwinInitializationSettings majburiy (aks holda xato beradi).
+    try {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const iosInit = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      const initSettings =
+          InitializationSettings(android: androidInit, iOS: iosInit);
+      await _localNotifications.initialize(initSettings);
+      const channel = AndroidNotificationChannel(
+        _androidChannelId,
+        'Asosiy bildirishnomalar',
+        description: 'Yangi buyurtma, chat va boshqa xabarlar',
+        importance: Importance.high,
+      );
+      await _localNotifications
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+    } catch (e) {
+      debugPrint('Lokal bildirishnoma sozlash xatosi: $e');
+    }
 
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
@@ -1502,6 +1515,7 @@ class PushNotificationService {
             importance: Importance.high,
             priority: Priority.high,
           ),
+          iOS: DarwinNotificationDetails(),
         ),
       );
     });
