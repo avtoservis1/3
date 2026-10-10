@@ -12542,6 +12542,17 @@ class _MasterTile extends StatelessWidget {
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
                           color: AppColors.textPrimary)),
+                  // Ustaning kasbi (admin kiritgan: Motorist, Elektrik...) ism ostida
+                  if ((master['profession']?.toString() ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(master['profession'].toString(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.primary)),
+                  ],
                   if (showService) ...[
                     const SizedBox(height: 3),
                     Text(master['service_name']?.toString() ?? '',
