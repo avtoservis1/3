@@ -983,6 +983,66 @@ class AdminApi {
     }
   }
 
+  // ---- Kasblar (usta kasbi katalogi: faqat nom) ----
+  static Future<List<dynamic>> listProfessions() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/api/admin/professions'));
+      if (res.statusCode == 200) return jsonDecode(res.body) as List<dynamic>;
+    } catch (_) {}
+    return [];
+  }
+
+  /// Muvaffaqiyatli bo'lsa null, aks holda xato matni.
+  static Future<String?> createProfession(String name) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/admin/professions'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name}),
+      );
+      if (res.statusCode == 200) return null;
+      try {
+        return (jsonDecode(res.body)['detail'] ?? 'Xatolik').toString();
+      } catch (_) {
+        return 'Xatolik';
+      }
+    } catch (_) {
+      return 'Internetga ulanib bo\'lmadi';
+    }
+  }
+
+  static Future<String?> updateProfession(int id,
+      {String? name, bool? isActive}) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/api/admin/professions/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          if (name != null) 'name': name,
+          if (isActive != null) 'is_active': isActive,
+        }),
+      );
+      if (res.statusCode == 200) return null;
+      try {
+        return (jsonDecode(res.body)['detail'] ?? 'Xatolik').toString();
+      } catch (_) {
+        return 'Xatolik';
+      }
+    } catch (_) {
+      return 'Internetga ulanib bo\'lmadi';
+    }
+  }
+
+  static Future<bool> deleteProfession(int id) async {
+    try {
+      final res =
+          await http.delete(Uri.parse('$baseUrl/api/admin/professions/$id'));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ---- Foydalanuvchilar (dashboard "Jami foydalanuvchi" kartasi uchun) ----
   static Future<List<dynamic>> users() async {
     try {
@@ -1728,6 +1788,18 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
                 MaterialPageRoute(
                     builder: (_) => const _AdminSectionScreen(
                         child: AdminServiceTypesTab()))),
+          ),
+          const SizedBox(height: 12),
+          _navCard(
+            icon: Icons.engineering_rounded,
+            color: AppColors.primary,
+            title: 'Kasblar',
+            subtitle: 'Ustalar kasbi: motorist, elektrik va boshqalar',
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const _AdminSectionScreen(
+                        child: AdminProfessionsTab()))),
           ),
           const SizedBox(height: 12),
           _navCard(
@@ -4346,6 +4418,210 @@ class AdminImagePickerField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class AdminProfessionsTab extends StatefulWidget {
+  const AdminProfessionsTab({super.key});
+  @override
+  State<AdminProfessionsTab> createState() => _AdminProfessionsTabState();
+}
+
+class _AdminProfessionsTabState extends State<AdminProfessionsTab> {
+  List<dynamic> _items = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await AdminApi.listProfessions();
+    if (!mounted) return;
+    setState(() {
+      _items = data;
+      _loading = false;
+    });
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _openForm({Map<String, dynamic>? existing}) async {
+    final controller =
+        TextEditingController(text: existing?['name']?.toString() ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(existing == null ? 'Yangi kasb' : 'Kasbni tahrirlash'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Masalan: Motorist'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Bekor qilish')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+              child: const Text('Saqlash')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    final err = existing == null
+        ? await AdminApi.createProfession(name)
+        : await AdminApi.updateProfession(existing['id'] as int, name: name);
+    if (err != null) {
+      _toast(err);
+    } else {
+      _load();
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> p) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('O\'chirish'),
+        content: Text(
+            '"${p['name']}" kasbini o\'chirmoqchimisiz? Bu kasbdagi ustalar o\'chmaydi, faqat ularning kasbi bo\'sh qoladi.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Bekor qilish')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('O\'chirish',
+                  style: TextStyle(color: AppColors.error))),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    if (await AdminApi.deleteProfession(p['id'] as int)) {
+      _load();
+    } else {
+      _toast('O\'chirib bo\'lmadi');
+    }
+  }
+
+  Future<void> _toggleActive(Map<String, dynamic> p) async {
+    final err = await AdminApi.updateProfession(p['id'] as int,
+        isActive: !(p['is_active'] == true));
+    if (err != null) {
+      _toast(err);
+    } else {
+      _load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openForm(),
+        backgroundColor: AppColors.primary,
+        icon: const Icon(Icons.add_rounded, color: Colors.white),
+        label: const Text('Yangi kasb',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+      ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 90),
+          children: [
+            const Text('Kasblar',
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            const Text(
+              'Faqat nomini kiriting. Usta ro\'yxatdan o\'tishda shu ro\'yxatdan kasbini tanlaydi va mijozga ismi ostida ko\'rinadi.',
+              style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 16),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 60),
+                child: Center(
+                    child: CircularProgressIndicator(color: AppColors.primary)),
+              )
+            else if (_items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 60),
+                child: Text(
+                  'Hozircha kasb yo\'q. Pastdagi "Yangi kasb" tugmasi orqali qo\'shing.',
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(fontSize: 14.5, color: AppColors.textSecondary),
+                ),
+              )
+            else
+              for (final raw in _items)
+                Builder(builder: (context) {
+                  final p = raw as Map<String, dynamic>;
+                  final active = p['is_active'] == true;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${p['name']}',
+                                  style: TextStyle(
+                                      fontSize: 15.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: active
+                                          ? AppColors.textPrimary
+                                          : AppColors.textMuted)),
+                              const SizedBox(height: 2),
+                              Text(
+                                  '${p['masters_count'] ?? 0} ta usta${active ? '' : ' · o\'chirilgan'}',
+                                  style: const TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppColors.textSecondary)),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: active,
+                          activeColor: AppColors.primary,
+                          onChanged: (_) => _toggleActive(p),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_rounded,
+                              color: AppColors.textSecondary, size: 20),
+                          onPressed: () => _openForm(existing: p),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded,
+                              color: AppColors.error, size: 20),
+                          onPressed: () => _delete(p),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -7077,6 +7353,9 @@ class _AdminCreateServiceOwnerScreenState
   // Avtoservis ustasi: xizmat turlari (telefon - yagona, login raqamining o'zi).
   List<dynamic> _serviceTypes = [];
   final Set<int> _selectedTypeIds = {};
+  // Ustaning kasbi (admin "Kasblar" bo'limida kiritgan ro'yxatdan).
+  List<dynamic> _professions = [];
+  int? _professionId;
 
   String _providerType = 'auto_service';
   List<dynamic> _services = [];
@@ -7097,6 +7376,14 @@ class _AdminCreateServiceOwnerScreenState
     super.initState();
     _loadServices();
     _loadServiceTypes();
+    _loadProfessions();
+  }
+
+  Future<void> _loadProfessions() async {
+    final list = await AdminApi.listProfessions();
+    if (!mounted) return;
+    setState(() => _professions =
+        list.where((p) => (p as Map)['is_active'] != false).toList());
   }
 
   Future<void> _loadServiceTypes() async {
@@ -7197,6 +7484,9 @@ class _AdminCreateServiceOwnerScreenState
       if (_selectedTypeIds.isEmpty) {
         return _error('Ustaning kamida bitta xizmat turini tanlang');
       }
+      if (_professions.isNotEmpty && _professionId == null) {
+        return _error('Ustaning kasbini tanlang');
+      }
     } else if (_carModel.text.trim().isEmpty) {
       return _error('Mashina rusmini (turini) kiriting');
     }
@@ -7213,6 +7503,7 @@ class _AdminCreateServiceOwnerScreenState
         'working_hours': _workingHours,
         if (_dayOff.isNotEmpty) 'day_off': _dayOff,
         'service_type_ids': _selectedTypeIds.toList(),
+        if (_professionId != null) 'profession_id': _professionId,
       } else ...{
         'car_model': _carModel.text.trim(),
         if (_workingHours != null) 'working_hours': _workingHours,
@@ -7358,6 +7649,29 @@ class _AdminCreateServiceOwnerScreenState
                     const SizedBox(height: 16),
                     _label('Dam olish kuni'),
                     _dayOffPicker(),
+                    if (_professions.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      _label('Ustaning kasbi'),
+                      DropdownButtonFormField<int>(
+                        value: _professionId,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          hintText: 'Kasbni tanlang',
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide.none),
+                        ),
+                        items: [
+                          for (final p in _professions)
+                            DropdownMenuItem<int>(
+                                value: (p as Map)['id'] as int,
+                                child: Text('${p['name']}')),
+                        ],
+                        onChanged: (v) => setState(() => _professionId = v),
+                      ),
+                    ],
                     if (_serviceTypes.isNotEmpty) ...[
                       const SizedBox(height: 20),
                       _label('Ustaning xizmat turlari'),
