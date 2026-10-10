@@ -772,6 +772,8 @@ class ApiService {
     // Ro'yxatdan o'tishda darhol tanlangan xizmat turlari (faqat
     // auto_service uchun mazmunli) - admin katalogidagi ServiceType ID'lari.
     List<int>? serviceTypeIds,
+    // Avtoservis ustasining kasbi (admin kiritgan ro'yxatdan, Profession.id).
+    int? professionId,
   }) async {
     try {
       final response = await http.post(
@@ -796,6 +798,7 @@ class ApiService {
           if (logoBase64 != null) 'logo_base64': logoBase64,
           if (serviceTypeIds != null && serviceTypeIds.isNotEmpty)
             'service_type_ids': serviceTypeIds,
+          if (professionId != null) 'profession_id': professionId,
         }),
       );
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -1276,6 +1279,19 @@ class ApiService {
   /// katalogidagi barcha faol xizmat turlarining ochiq ro'yxati. Ro'yxatdan
   /// o'tish jarayonida "qaysi xizmat turlarini taklif qilasiz" ekranida
   /// ishlatiladi.
+  /// Admin kiritgan kasblar ro'yxati (ro'yxatdan o'tishda tanlash uchun).
+  static Future<Map<String, dynamic>> getProfessions() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/api/professions'));
+      if (response.statusCode == 200) {
+        return {'success': true, 'data': jsonDecode(response.body) as List};
+      }
+      return {'success': false, 'data': []};
+    } catch (e) {
+      return {'success': false, 'data': []};
+    }
+  }
+
   static Future<Map<String, dynamic>> getPublicServiceTypes() async {
     try {
       final response = await http.get(Uri.parse('$baseUrl/api/service-types'));
@@ -2693,10 +2709,29 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
   final Set<int> _selectedTypeIds = {};
   bool _typesLoading = true;
 
+  // Ustaning kasbi (admin kiritgan ro'yxatdan tanlanadi).
+  List<Map<String, dynamic>> _professions = [];
+  int? _selectedProfessionId;
+  bool _professionsLoading = true;
+
   @override
   void initState() {
     super.initState();
-    if (_isAutoService) _loadServiceTypes();
+    if (_isAutoService) {
+      _loadServiceTypes();
+      _loadProfessions();
+    }
+  }
+
+  Future<void> _loadProfessions() async {
+    final result = await ApiService.getProfessions();
+    if (!mounted) return;
+    setState(() {
+      _professionsLoading = false;
+      if (result['success'] == true) {
+        _professions = (result['data'] as List).cast<Map<String, dynamic>>();
+      }
+    });
   }
 
   Future<void> _loadServiceTypes() async {
@@ -2785,7 +2820,8 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
       return _selectedService != null &&
           _workingHoursFrom != null &&
           _workingHoursTo != null &&
-          _selectedTypeIds.isNotEmpty;
+          _selectedTypeIds.isNotEmpty &&
+          (_professions.isEmpty || _selectedProfessionId != null);
     }
     // Evakuator / benzin yetkazish: ish vaqti va mashina rusmi (turi) majburiy.
     if (_workingHoursFrom == null || _workingHoursTo == null) return false;
@@ -2846,6 +2882,7 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
       dayOff: dayOff,
       logoBase64: _isAutoService ? null : _logoBase64,
       serviceTypeIds: _isAutoService ? _selectedTypeIds.toList() : null,
+      professionId: _isAutoService ? _selectedProfessionId : null,
     );
 
     setState(() => _isSubmitting = false);
@@ -3064,7 +3101,37 @@ class _ServiceOwnerSetupScreenState extends State<ServiceOwnerSetupScreen> {
       _label('Dam olish kuni (ixtiyoriy)'),
       _dayOffPicker(),
       const SizedBox(height: 22),
-      _sectionTitle('4', 'Qaysi xizmat turlarida ishlaysiz?'),
+      _sectionTitle('4', 'Kasbingiz'),
+      const SizedBox(height: 6),
+      const Text('Ro\'yxatdan kasbingizni tanlang. U mijozlarga ismingiz ostida ko\'rsatiladi.',
+          style: TextStyle(
+              fontSize: 12.5, color: AppColors.textSecondary, height: 1.4)),
+      const SizedBox(height: 12),
+      if (_professionsLoading)
+        const Center(
+            child: Padding(
+                padding: EdgeInsets.all(12),
+                child: CircularProgressIndicator(color: AppColors.primary)))
+      else if (_professions.isEmpty)
+        const Text('Kasblar hali kiritilmagan',
+            style: TextStyle(color: AppColors.textMuted))
+      else
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final p in _professions)
+              ChoiceChip(
+                label: Text('${p['name'] ?? ''}'),
+                selected: _selectedProfessionId == (p['id'] as int),
+                selectedColor: AppColors.primaryPale,
+                onSelected: (sel) => setState(() =>
+                    _selectedProfessionId = sel ? p['id'] as int : null),
+              ),
+          ],
+        ),
+      const SizedBox(height: 22),
+      _sectionTitle('5', 'Qaysi xizmat turlarida ishlaysiz?'),
       const SizedBox(height: 6),
       const Text(
           'Ro\'yxatdan o\'zingiz bajaradigan xizmat turlarini belgilang (kamida bittasi). Keyinroq "Xizmatlar" bo\'limidan o\'zgartirishingiz mumkin.',
