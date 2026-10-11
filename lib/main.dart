@@ -1237,11 +1237,11 @@ class ApiService {
   static Future<Map<String, dynamic>> getMasters({
     required double latitude,
     required double longitude,
-    required String categoryId,
+    String? categoryId, // berilmasa - barcha ustalar
   }) async {
     try {
       final uri = Uri.parse('$baseUrl/api/masters').replace(queryParameters: {
-        'category': categoryId,
+        if (categoryId != null && categoryId.isNotEmpty) 'category': categoryId,
         'lat': latitude.toString(),
         'lng': longitude.toString(),
       });
@@ -4687,7 +4687,7 @@ class _HomeWheelActionsGrid extends StatelessWidget {
       ),
       _WheelActionData(
         title: 'Kategoriya\nbo\'yicha',
-        subtitle: 'Xizmatlarni turkum bo\'yicha tanlang',
+        subtitle: 'Ustalarni kasbi bo\'yicha tanlang',
         icon: Icons.grid_view_rounded,
         bgColors: const [Color(0xFFFFE9CF), Color(0xFFFFF6EB)],
         accent: const Color(0xFFFF8A00),
@@ -5842,12 +5842,11 @@ class _LocationBottomSheet extends StatelessWidget {
   }
 }
 
-// ---- "Servislar kategoriya bo'yicha" sahifasi ---------------------------
-// Ilgari bosh sahifadagi "Mashhur servislar" segmentida ko'rsatilgan
-// ro'yxat endi shu alohida sahifaga ko'chirildi va yuqoridagi banner
-// karuselidagi "Servislar kategoriya bo'yicha" tugmasi orqali ochiladi.
-// Har bir servis kartasida endi shu servisning xaritadagi joylashuvini
-// ko'rsatuvchi tugma ham mavjud.
+// ---- "Kategoriya bo'yicha" sahifasi: USTALAR ro'yxati ------------------
+// Bosh sahifadagi "Kategoriya bo'yicha" kartasi orqali ochiladi. Ilgari bu yerda
+// servislar ko'rsatilardi, endi barcha ustalar chiqadi: reytingi baland usta
+// birinchi. Tepada kasb bo'yicha filtr (Motorist, Elektrik...) bor; usta bosilsa,
+// buyurtma aynan shu ustaga beriladi.
 class PopularServicesScreen extends StatefulWidget {
   const PopularServicesScreen({super.key});
   @override
@@ -5855,8 +5854,10 @@ class PopularServicesScreen extends StatefulWidget {
 }
 
 class _PopularServicesScreenState extends State<PopularServicesScreen> {
-  List<Map<String, dynamic>> _services = [];
+  List<Map<String, dynamic>> _masters = [];
   bool _loading = true;
+  String? _error;
+  String? _profession; // null = "Barchasi"
 
   @override
   void initState() {
@@ -5864,216 +5865,143 @@ class _PopularServicesScreenState extends State<PopularServicesScreen> {
     _load();
   }
 
-  // Reyting va baholar soniga qarab eng mashhurlari tepaga chiqariladi.
   Future<void> _load() async {
-    setState(() => _loading = true);
-    final loc = await resolveCurrentLocation();
-    final lat = loc?.latitude ?? 39.6542;
-    final lng = loc?.longitude ?? 66.9597;
-    final result =
-        await ApiService.getNearbyServices(latitude: lat, longitude: lng);
-    if (!mounted) return;
     setState(() {
-      _loading = false;
-      if (result['success'] == true) {
-        final list = (result['data'] as List).cast<Map<String, dynamic>>();
-        list.sort((a, b) {
-          final ratingA = (a['rating'] as num?)?.toDouble() ?? 0;
-          final ratingB = (b['rating'] as num?)?.toDouble() ?? 0;
-          if (ratingB != ratingA) return ratingB.compareTo(ratingA);
-          final reviewsA = (a['review_count'] as num?)?.toInt() ?? 0;
-          final reviewsB = (b['review_count'] as num?)?.toInt() ?? 0;
-          return reviewsB.compareTo(reviewsA);
-        });
-        _services = list.take(20).toList();
-      }
+      _loading = true;
+      _error = null;
     });
+    final loc = await resolveCurrentLocation();
+    final result = await ApiService.getMasters(
+      latitude: loc?.latitude ?? 39.6542,
+      longitude: loc?.longitude ?? 66.9597,
+    );
+    if (!mounted) return;
+    if (result['success'] == true) {
+      final list = (result['data'] as List).cast<Map<String, dynamic>>();
+      // Reyting, keyin baholar soni, keyin masofa bo'yicha.
+      list.sort((a, b) {
+        final ra = (a['rating'] as num?)?.toDouble() ?? 0;
+        final rb = (b['rating'] as num?)?.toDouble() ?? 0;
+        if (rb != ra) return rb.compareTo(ra);
+        final ca = (a['review_count'] as num?)?.toInt() ?? 0;
+        final cb = (b['review_count'] as num?)?.toInt() ?? 0;
+        if (cb != ca) return cb.compareTo(ca);
+        final da = (a['distance'] as num?)?.toDouble() ?? double.infinity;
+        final db = (b['distance'] as num?)?.toDouble() ?? double.infinity;
+        return da.compareTo(db);
+      });
+      setState(() {
+        _masters = list;
+        _loading = false;
+      });
+    } else {
+      setState(() {
+        _error = result['message'] as String? ?? 'Ustalar yuklanmadi';
+        _loading = false;
+      });
+    }
   }
+
+  List<String> get _professions {
+    final set = <String>{};
+    for (final m in _masters) {
+      final p = m['profession']?.toString() ?? '';
+      if (p.isNotEmpty) set.add(p);
+    }
+    final list = set.toList()..sort();
+    return list;
+  }
+
+  List<Map<String, dynamic>> get _visible => _profession == null
+      ? _masters
+      : _masters
+          .where((m) => m['profession']?.toString() == _profession)
+          .toList();
+
+  Widget _chip(String label, bool selected, VoidCallback onTap) => Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: ChoiceChip(
+          label: Text(label),
+          selected: selected,
+          selectedColor: AppColors.primaryPale,
+          onSelected: (_) => onTap(),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final visible = _visible;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _load,
-          color: AppColors.primary,
-          child: CustomScrollView(
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: Row(
-                    children: [
-                      authBackButton(context),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Text('Servislar kategoriya bo\'yicha',
-                            style: TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_loading)
-                const SliverFillRemaining(
-                    child: Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.primary)))
-              else if (_services.isEmpty)
-                const SliverFillRemaining(
-                  child: Center(
-                    child: Text('Hozircha servislar mavjud emas',
-                        style: TextStyle(
-                            fontSize: 13, color: AppColors.textMuted)),
-                  ),
-                )
-              else
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
-                  sliver: SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) => _popularServiceCard(_services[i]),
-                      childCount: _services.length,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Servis kartasi - nomi, manzili, reytingi va shu servisni xaritada
-  // ko'rish uchun alohida tugma (NearbyServicesMapScreen'ga focusService
-  // bilan o'tadi va shu servisning joylashuvini xaritada ko'rsatadi).
-  Widget _popularServiceCard(Map<String, dynamic> s) {
-    final name = s['name']?.toString() ?? 'Servis';
-    final address = s['address']?.toString() ?? '';
-    final rating = s['rating'];
-    final reviewCount = s['review_count'];
-    final logoUrl = s['logo_url'] as String?;
-    final hasLogo = logoUrl != null && logoUrl.startsWith('data:');
-    final hasLocation = s['latitude'] != null && s['longitude'] != null;
-    return GestureDetector(
-      onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => ServiceDetailScreen(serviceId: s['id'] as int))),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 12,
-                offset: const Offset(0, 4))
-          ],
-        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryPale.withOpacity(0.5),
-                    borderRadius: BorderRadius.circular(14),
-                    image: hasLogo
-                        ? DecorationImage(
-                            image: MemoryImage(
-                                base64Decode(logoUrl.split(',').last)),
-                            fit: BoxFit.contain)
-                        : null,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Row(
+                children: [
+                  authBackButton(context),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Text('Ustalar kategoriya bo\'yicha',
+                        style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.textPrimary)),
                   ),
-                  child: !hasLogo
-                      ? const Icon(Icons.storefront_rounded,
-                          color: AppColors.primary, size: 22)
-                      : null,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(name,
-                          style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.textPrimary)),
-                      const SizedBox(height: 3),
-                      Text(
-                        address,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 13, color: AppColors.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
+                ],
+              ),
+            ),
+            if (!_loading && _error == null && _professions.isNotEmpty)
+              SizedBox(
+                height: 56,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.star_rounded,
-                            size: 14, color: AppColors.warning),
-                        const SizedBox(width: 2),
-                        Text('${rating ?? 0}',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.textPrimary)),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text('${reviewCount ?? 0} ta baho',
-                        style: const TextStyle(
-                            fontSize: 11, color: AppColors.textMuted)),
+                    _chip('Barchasi', _profession == null,
+                        () => setState(() => _profession = null)),
+                    for (final p in _professions)
+                      _chip(p, _profession == p,
+                          () => setState(() => _profession = p)),
                   ],
                 ),
-              ],
-            ),
-            if (hasLocation) ...[
+              )
+            else
               const SizedBox(height: 12),
-              GestureDetector(
-                onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            NearbyServicesMapScreen(focusService: s))),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryPale.withOpacity(0.45),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.map_outlined,
-                          size: 16, color: AppColors.primary),
-                      SizedBox(width: 6),
-                      Text('Xaritada ko\'rish',
-                          style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.primary)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            Expanded(
+              child: _loading
+                  ? const Center(
+                      child:
+                          CircularProgressIndicator(color: AppColors.primary))
+                  : _error != null
+                      ? Center(
+                          child: Text(_error!,
+                              style: const TextStyle(
+                                  color: AppColors.textSecondary)))
+                      : visible.isEmpty
+                          ? const Center(
+                              child: Text('Hozircha ustalar mavjud emas',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      color: AppColors.textMuted)),
+                            )
+                          : RefreshIndicator(
+                              onRefresh: _load,
+                              color: AppColors.primary,
+                              child: ListView.builder(
+                                padding:
+                                    const EdgeInsets.fromLTRB(20, 4, 20, 110),
+                                itemCount: visible.length,
+                                itemBuilder: (context, i) => _MasterTile(
+                                  master: visible[i],
+                                  onTap: () =>
+                                      bookWithMaster(context, visible[i], ''),
+                                ),
+                              ),
+                            ),
+            ),
           ],
         ),
       ),
@@ -12545,7 +12473,10 @@ class _MasterTile extends StatelessWidget {
                   // Ustaning kasbi (admin kiritgan: Motorist, Elektrik...) ism ostida
                   if ((master['profession']?.toString() ?? '').isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(master['profession'].toString(),
+                    Text(
+                        master['experience_years'] != null
+                            ? '${master['profession']} · ${master['experience_years']} yil tajriba'
+                            : master['profession'].toString(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
