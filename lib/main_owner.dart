@@ -7984,6 +7984,17 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                   const SizedBox(height: 28),
                   _infoTile(
                       Icons.person_outline, 'Usta', owner?['name'] ?? '—'),
+                  if (service?['provider_type'] == null ||
+                      service?['provider_type'] == 'auto_service') ...[
+                    _infoTile(Icons.engineering_outlined, 'Kasb',
+                        owner?['profession'] ?? 'Tanlanmagan'),
+                    _infoTile(
+                        Icons.workspace_premium_outlined,
+                        'Tajriba',
+                        owner?['experience_years'] != null
+                            ? '${owner?['experience_years']} yil'
+                            : 'Belgilanmagan'),
+                  ],
                   _infoTile(Icons.phone_outlined, 'Telefon',
                       service?['phone'] ?? '—'),
                   if (service?['provider_type'] == 'evacuator' ||
@@ -8019,7 +8030,11 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                               MaterialPageRoute(
                                   builder: (_) => OwnerWorkSettingsScreen(
                                       ownerId: widget.ownerId,
-                                      service: service ?? {})));
+                                      service: service ?? {},
+                                      professionId:
+                                          owner?['profession_id'] as int?,
+                                      experienceYears:
+                                          owner?['experience_years'] as int?)));
                           if (changed == true) _load();
                         },
                         child: Center(
@@ -8037,7 +8052,7 @@ class _ServiceOwnerProfileTabState extends State<ServiceOwnerProfileTab> {
                               Text(
                                   ((service?['working_hours'] ?? '').toString().isEmpty)
                                       ? 'Ish vaqti va telefonni belgilang'
-                                      : 'Ish vaqti, dam olish kuni, telefon',
+                                      : 'Kasb, ish vaqti, dam olish kuni, telefon',
                                   style: TextStyle(
                                       color: ((service?['working_hours'] ?? '')
                                               .toString()
@@ -8950,8 +8965,14 @@ class _OwnerNotificationsScreenState extends State<OwnerNotificationsScreen> {
 class OwnerWorkSettingsScreen extends StatefulWidget {
   final int ownerId;
   final Map<String, dynamic> service;
+  final int? professionId; // ustaning joriy kasbi (Profession.id)
+  final int? experienceYears; // ish tajribasi (yil)
   const OwnerWorkSettingsScreen(
-      {super.key, required this.ownerId, required this.service});
+      {super.key,
+      required this.ownerId,
+      required this.service,
+      this.professionId,
+      this.experienceYears});
   @override
   State<OwnerWorkSettingsScreen> createState() =>
       _OwnerWorkSettingsScreenState();
@@ -8970,14 +8991,37 @@ class _OwnerWorkSettingsScreenState extends State<OwnerWorkSettingsScreen> {
   ];
 
   final _phone = TextEditingController();
+  final _experience = TextEditingController();
   TimeOfDay? _from;
   TimeOfDay? _to;
   String _dayOff = _days.first;
   bool _saving = false;
 
+  // Kasb faqat avtoservis ustalari uchun (evakuator/benzin dastavkada yo'q).
+  List<Map<String, dynamic>> _professions = [];
+  int? _professionId;
+  bool get _isAutoMaster {
+    final t = widget.service['provider_type'];
+    return t == null || t == 'auto_service';
+  }
+
+  Future<void> _loadProfessions() async {
+    final result = await ApiService.getProfessions();
+    if (!mounted) return;
+    if (result['success'] == true) {
+      setState(() => _professions =
+          (result['data'] as List).cast<Map<String, dynamic>>());
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _professionId = widget.professionId;
+    if (widget.experienceYears != null) {
+      _experience.text = widget.experienceYears.toString();
+    }
+    if (_isAutoMaster) _loadProfessions();
     final phone = (widget.service['phone'] ?? '').toString();
     final digits = phone.replaceAll(RegExp(r'\D'), '');
     _phone.text = digits.length >= 9 ? digits.substring(digits.length - 9) : '';
@@ -8994,6 +9038,7 @@ class _OwnerWorkSettingsScreenState extends State<OwnerWorkSettingsScreen> {
   @override
   void dispose() {
     _phone.dispose();
+    _experience.dispose();
     super.dispose();
   }
 
@@ -9035,11 +9080,21 @@ class _OwnerWorkSettingsScreenState extends State<OwnerWorkSettingsScreen> {
           SnackBar(content: Text(err), backgroundColor: AppColors.error));
       return;
     }
+    final expText = _experience.text.trim();
+    final expYears = expText.isEmpty ? null : int.tryParse(expText);
+    if (_isAutoMaster && expText.isNotEmpty && expYears == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Tajribani raqam bilan kiriting'),
+          backgroundColor: AppColors.error));
+      return;
+    }
     setState(() => _saving = true);
     final result = await ApiService.updateServiceOwnerProfile(widget.ownerId, {
       'phone': '+998$digits',
       'working_hours': '${_fmt(_from!)}-${_fmt(_to!)}',
       'day_off': _dayOff == _days.first ? '' : _dayOff,
+      if (_isAutoMaster && _professionId != null) 'profession_id': _professionId,
+      if (_isAutoMaster && expYears != null) 'experience_years': expYears,
     });
     if (!mounted) return;
     setState(() => _saving = false);
@@ -9112,6 +9167,38 @@ class _OwnerWorkSettingsScreenState extends State<OwnerWorkSettingsScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 children: [
+                  if (_isAutoMaster && _professions.isNotEmpty) ...[
+                    _label('Kasbingiz'),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final p in _professions)
+                          ChoiceChip(
+                            label: Text('${p['name'] ?? ''}'),
+                            selected: _professionId == (p['id'] as int),
+                            selectedColor: AppColors.primaryPale,
+                            onSelected: (sel) => setState(() =>
+                                _professionId = sel ? p['id'] as int : null),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (_isAutoMaster) ...[
+                    _label('Ish tajribangiz (yil)'),
+                    TextField(
+                      controller: _experience,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(2),
+                      ],
+                      decoration: const InputDecoration(
+                          hintText: 'Masalan: 5', suffixText: 'yil'),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   _label('Telefon raqamingiz'),
                   TextField(
                     controller: _phone,
