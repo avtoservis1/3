@@ -3140,6 +3140,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _isRegistering = false;
   // Ilova endi faqat Toshkent shahri uchun ishlaydi - shahar tanlash
   // imkoniyati olib tashlandi, har doim "Toshkent" yuboriladi.
   final String _city = 'Toshkent';
@@ -3167,26 +3168,62 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     return null;
   }
 
+  // Familiya ixtiyoriy. Mashina ro'yxatdan o'tishda so'ralmaydi: uni mijoz
+  // ilova ichida xohlagan payt qo'shadi, buyurtma berishdan oldin esa majburiy.
   bool get _canContinue =>
       _firstNameController.text.trim().isNotEmpty &&
-      _lastNameController.text.trim().isNotEmpty &&
       _passwordController.text.length >= 6 &&
       _confirmPasswordController.text == _passwordController.text;
 
-  void _continue() {
-    if (!_canContinue) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CarSetupScreen(
-          phone: widget.phone,
-          firstName: _firstNameController.text.trim(),
-          lastName: _lastNameController.text.trim(),
-          password: _passwordController.text,
-          city: _city,
-        ),
-      ),
+  Future<void> _continue() async {
+    if (!_canContinue || _isRegistering) return;
+    setState(() => _isRegistering = true);
+
+    final firstName = _firstNameController.text.trim();
+    final lastName = _lastNameController.text.trim();
+    final fullName = lastName.isEmpty ? firstName : '$firstName $lastName';
+    final phone = widget.phone.isNotEmpty
+        ? widget.phone.replaceAll(' ', '')
+        : '+998000000000';
+
+    final result = await ApiService.register(
+      phone: phone,
+      name: fullName,
+      password: _passwordController.text,
+      city: _city,
     );
+
+    if (!mounted) return;
+    setState(() => _isRegistering = false);
+
+    if (result['success'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(result['message'] ??
+                'Ro\'yxatdan o\'tmadi, qayta urinib ko\'ring'),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    final data = result['data'] as Map<String, dynamic>;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('token', data['token']?.toString() ?? '');
+    await prefs.setString('user_id', data['user_id'].toString());
+    await prefs.setString('role', data['role']?.toString() ?? 'user');
+    await prefs.setString('user_name', fullName);
+    await prefs.setString('city', _city);
+    await prefs.setString('phone', phone);
+
+    // Yangi foydalanuvchi uchun push tokenni darhol yozamiz (ilovani qayta
+    // ochishni kutmasdan bildirishnomalar kelishi uchun).
+    final newUserId = int.tryParse(data['user_id'].toString());
+    if (newUserId != null) PushNotificationService.registerToken(newUserId);
+
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(context,
+        MaterialPageRoute(builder: (_) => const HomeScreen()), (r) => false);
   }
 
   @override
@@ -3207,7 +3244,8 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary)),
                 const SizedBox(height: 10),
-                const Text('O\'zingiz haqingizda ma\'lumotlarni kiriting.',
+                const Text(
+                    'O\'zingiz haqingizda ma\'lumotlarni kiriting. Mashinangizni keyinroq, ilova ichida qo\'shasiz.',
                     style: TextStyle(
                         fontSize: 15,
                         color: AppColors.textSecondary,
@@ -3229,7 +3267,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                           color: AppColors.textMuted)),
                 ),
                 const SizedBox(height: 20),
-                const Text('Familiya',
+                const Text('Familiya (ixtiyoriy)',
                     style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -3306,8 +3344,11 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 ),
                 const SizedBox(height: 32),
                 GlassGradientButton(
-                    label: 'Davom etish',
-                    onPressed: _canContinue ? _continue : null),
+                    label: _isRegistering
+                        ? 'Yuklanmoqda...'
+                        : 'Ro\'yxatdan o\'tish',
+                    onPressed:
+                        (_canContinue && !_isRegistering) ? _continue : null),
               ],
             ),
           ),
@@ -6641,6 +6682,10 @@ class _CallOutRequestSheetState extends State<_CallOutRequestSheet> {
     if (userId == 0) return;
     final serviceId = widget.service['id'] as int?;
     if (serviceId == null) return;
+
+    // Mashina qo'shilmagan bo'lsa, avval qo'shishni talab qilamiz.
+    if (!await ensureUserHasCar(context, userId)) return;
+    if (!mounted) return;
 
     setState(() => _submitting = true);
     final result = await ApiService.createOrder(
@@ -10235,6 +10280,10 @@ class _OrderBookingScreenState extends State<OrderBookingScreen> {
     final userId = int.tryParse(prefs.getString('user_id') ?? '') ?? 0;
     if (userId == 0) return;
 
+    // Mashina qo'shilmagan bo'lsa, avval qo'shishni talab qilamiz.
+    if (!await ensureUserHasCar(context, userId)) return;
+    if (!mounted) return;
+
     setState(() => _isSubmitting = true);
     final result = await ApiService.createOrder(
       userId: userId,
@@ -12396,6 +12445,43 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 // eng uzoqdagilari bilan tugaydi. Xaritada esa servislar ko'rsatiladi: servis
 // ustiga bosilganda shu xizmatga mos ustalar reyting bo'yicha chiqadi.
 // ========================================================================
+
+// Buyurtma berishdan oldin mijozda kamida bitta mashina bo'lishi shart.
+// Mashina yo'q bo'lsa, qo'shishni taklif qiladi va qo'shilgach true qaytaradi.
+// Server bilan aloqa bo'lmasa buyurtmani to'xtatmaymiz (server o'zi tekshiradi).
+Future<bool> ensureUserHasCar(BuildContext context, int userId) async {
+  final check = await ApiService.getUserCars(userId);
+  if (check['success'] != true) return true;
+  if ((check['data'] as List).isNotEmpty) return true;
+  if (!context.mounted) return false;
+
+  final wantsAdd = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Mashinangizni qo\'shing'),
+      content: const Text(
+          'Buyurtma berish uchun avval mashinangiz ma\'lumotlarini kiriting.'),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Bekor qilish')),
+        TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Mashina qo\'shish')),
+      ],
+    ),
+  );
+  if (wantsAdd != true || !context.mounted) return false;
+
+  await showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _AddCarSheet(userId: userId, onAdded: () {}),
+  );
+  final after = await ApiService.getUserCars(userId);
+  return after['success'] == true && (after['data'] as List).isNotEmpty;
+}
 
 // Tanlangan ustaga buyurtma berishni boshlaydi (servis yopiq bo'lsa ogohlantiradi).
 void bookWithMaster(
